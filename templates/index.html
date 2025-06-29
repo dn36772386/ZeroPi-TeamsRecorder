@@ -2,1029 +2,722 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>録音コントローラー | Raspberry Pi</title>
     <style>
         :root {
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #1a1a1a;
-            --bg-tertiary: #2a2a2a;
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0a0;
-            --text-tertiary: #606060;
-            --accent-primary: #3b82f6;
-            --accent-hover: #2563eb;
-            --success: #10b981;
-            --success-hover: #059669;
-            --danger: #ef4444;
-            --danger-hover: #dc2626;
-            --warning: #f59e0b;
-            --border: #333333;
-            --shadow: rgba(0, 0, 0, 0.5);
+            --color-canvas-default: #F6F8FA;
+            --color-canvas-inset: #F6F8FA;
+            --color-header-bg: #24292F;
+            --color-header-text: #ffffff;
+            --color-text-primary: #1F2328;
+            --color-text-secondary: #656D76;
+            --color-border-default: #D0D7DE;
+            --color-border-muted: #D8DEE4;
+            --color-neutral-muted: rgba(175, 184, 193, 0.2);
+            --color-accent-fg: #0969DA;
+            --color-accent-emphasis: #0969DA;
+            --color-success-fg: #1A7F37;
+            --color-danger-fg: #CF222E;
+            --color-btn-bg: #F6F8FA;
+            --color-btn-hover-bg: #F3F4F6;
+            --color-btn-primary-bg: #2DA44E;
+            --color-btn-primary-hover-bg: #2C974B;
+            --color-btn-primary-text: #ffffff;
+            --color-btn-danger-hover-bg: #CF222E;
+            --color-btn-danger-hover-text: #ffffff;
+            --color-btn-danger-hover-border: #CF222E;
+            --font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
         }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            line-height: 1.6;
-            overflow-x: hidden;
+            margin: 0;
+            background-color: var(--color-canvas-default);
+            font-family: var(--font-family-sans-serif);
+            color: var(--color-text-primary);
+            font-size: 14px;
+            line-height: 1.5;
         }
-        
-        .app-container {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* ヘッダー */
-        .header {
-            background-color: var(--bg-secondary);
-            border-bottom: 1px solid var(--border);
-            padding: 1rem 2rem;
-            backdrop-filter: blur(10px);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        
-        .header-content {
-            max-width: 1200px;
-            margin: 0 auto;
+
+        .gh-header {
+            background-color: var(--color-header-bg);
+            color: var(--color-header-text);
+            padding: 12px 24px;
             display: flex;
             align-items: center;
+            gap: 16px;
+            font-weight: 600;
+        }
+
+        .gh-header-icon {
+            fill: currentColor;
+        }
+
+        .page-content {
+            max-width: 1012px;
+            margin: 24px auto;
+            padding: 0 24px;
+        }
+
+        .repo-header {
+            margin-bottom: 24px;
+        }
+
+        .repo-name {
+            font-size: 20px;
+            font-weight: 400;
+            color: var(--color-accent-fg);
+        }
+
+        .repo-name a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .repo-name strong {
+            font-weight: 600;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
+        
+        @media (min-width: 1012px) {
+            .main-grid {
+                grid-template-columns: 2fr 1fr;
+            }
+        }
+
+        .Box {
+            background-color: #ffffff;
+            border: 1px solid var(--color-border-default);
+            border-radius: 6px;
+        }
+
+        .Box-header {
+            padding: 12px 16px;
+            background-color: var(--color-canvas-inset);
+            border-bottom: 1px solid var(--color-border-default);
+            display: flex;
             justify-content: space-between;
-        }
-        
-        .logo {
-            display: flex;
             align-items: center;
-            gap: 0.75rem;
-            font-size: 1.25rem;
+        }
+
+        .Box-title {
+            font-size: 16px;
             font-weight: 600;
         }
         
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-            border-radius: 8px;
+        .Box-body {
+            padding: 16px;
+        }
+
+        .Box-row {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--color-border-muted);
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-        }
-        
-        /* メインコンテンツ */
-        .main-content {
-            flex: 1;
-            padding: 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-            width: 100%;
-        }
-        
-        /* カード */
-        .card {
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 6px var(--shadow);
-            transition: all 0.3s ease;
-        }
-        
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 12px var(--shadow);
-        }
-        
-        .card-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 1rem;
-        }
-        
-        .card-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        
-        /* デバイスリスト */
-        .device-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            max-height: 400px;
-            overflow-y: auto;
-            padding-right: 0.5rem;
-        }
-        
-        .device-list::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        .device-list::-webkit-scrollbar-track {
-            background: var(--bg-tertiary);
-            border-radius: 3px;
-        }
-        
-        .device-list::-webkit-scrollbar-thumb {
-            background: var(--text-tertiary);
-            border-radius: 3px;
-        }
-        
-        .device-item {
-            background-color: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
+            gap: 12px;
             cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-            overflow: hidden;
+            transition: background-color 0.1s ease;
+        }
+        .Box-row:last-child {
+            border-bottom: none;
+        }
+        .Box-row:hover {
+            background-color: var(--color-canvas-default);
+        }
+        .Box-row.selected {
+            background-color: #DDF4FF;
+            border-left: 3px solid var(--color-accent-emphasis);
+            padding-left: 13px;
         }
         
-        .device-item::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 3px;
-            height: 100%;
-            background-color: transparent;
-            transition: background-color 0.2s ease;
+        .Box-row-icon {
+            color: var(--color-text-secondary);
+        }
+
+        .Box-row-content {
+            flex: 1;
         }
         
-        .device-item:hover {
-            background-color: #2a2a2a;
-            border-color: var(--accent-primary);
+        .Box-row-content .text-bold {
+            font-weight: 600;
         }
         
-        .device-item.selected {
-            background-color: rgba(59, 130, 246, 0.1);
-            border-color: var(--accent-primary);
+        .Box-row-content .text-muted {
+            font-size: 12px;
+            color: var(--color-text-secondary);
         }
         
-        .device-item.selected::before {
-            background-color: var(--accent-primary);
-        }
-        
-        .device-name {
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 0.25rem;
-        }
-        
-        .device-info {
+        .Box-row-actions {
             display: flex;
-            align-items: center;
-            gap: 1rem;
-            color: var(--text-secondary);
-            font-size: 0.875rem;
+            gap: 8px;
         }
-        
-        .device-status {
+
+        .status-badge {
             display: inline-flex;
             align-items: center;
-            gap: 0.25rem;
-            padding: 0.125rem 0.5rem;
-            border-radius: 9999px;
-            font-size: 0.75rem;
+            gap: 4px;
+            font-size: 12px;
             font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            border: 1px solid transparent;
         }
         
-        .device-status.connected {
-            background-color: rgba(16, 185, 129, 0.2);
-            color: var(--success);
+        .status-badge.connected {
+            color: var(--color-success-fg);
+            border-color: rgba(46, 160, 67, 0.4);
+            background-color: #dafbe1;
         }
-        
-        .device-status.paired {
-            background-color: rgba(59, 130, 246, 0.2);
-            color: var(--accent-primary);
+
+        .status-badge.paired {
+            color: var(--color-text-secondary);
+            border-color: var(--color-border-muted);
+            background-color: #F6F8FA;
         }
         
         .status-dot {
-            width: 6px;
-            height: 6px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background-color: currentColor;
         }
-        
-        /* ボタン */
-        .button {
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
+
+        .btn {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            outline: none;
-            position: relative;
-            overflow: hidden;
+            gap: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 5px 16px;
+            border: 1px solid var(--color-border-default);
+            border-radius: 6px;
+            background-color: var(--color-btn-bg);
+            cursor: pointer;
+            transition: background-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
         }
-        
-        .button::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.2);
-            transform: translate(-50%, -50%);
-            transition: width 0.6s, height 0.6s;
+        .btn:hover:not(:disabled) {
+            background-color: var(--color-btn-hover-bg);
         }
-        
-        .button:active::before {
-            width: 300px;
-            height: 300px;
-        }
-        
-        .button-primary {
-            background-color: var(--accent-primary);
-            color: white;
-        }
-        
-        .button-primary:hover:not(:disabled) {
-            background-color: var(--accent-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-        }
-        
-        .button-success {
-            background-color: var(--success);
-            color: white;
-        }
-        
-        .button-success:hover:not(:disabled) {
-            background-color: var(--success-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-        }
-        
-        .button-danger {
-            background-color: var(--danger);
-            color: white;
-        }
-        
-        .button-danger:hover:not(:disabled) {
-            background-color: var(--danger-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
-        }
-        
-        .button-secondary {
-            background-color: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-        
-        .button-secondary:hover:not(:disabled) {
-            background-color: #333333;
-            border-color: var(--text-tertiary);
-        }
-        
-        .button:disabled {
-            opacity: 0.5;
+        .btn:disabled {
+            opacity: 0.6;
             cursor: not-allowed;
         }
-        
-        .button-group {
-            display: flex;
-            gap: 1rem;
-            margin-top: 1.5rem;
+
+        .btn-primary {
+            background-color: var(--color-btn-primary-bg);
+            color: var(--color-btn-primary-text);
+            border-color: rgba(27, 31, 36, 0.15);
+        }
+        .btn-primary:hover:not(:disabled) {
+            background-color: var(--color-btn-primary-hover-bg);
         }
         
-        .button-group .button {
-            flex: 1;
+        .btn-danger {
+            color: var(--color-danger-fg);
         }
-        
-        /* ステータス表示 */
-        .status-display {
-            background-color: var(--bg-tertiary);
-            border-radius: 8px;
-            padding: 1rem;
+        .btn-danger:hover:not(:disabled) {
+            color: var(--color-btn-danger-hover-text);
+            background-color: var(--color-btn-danger-hover-bg);
+            border-color: var(--color-btn-danger-hover-border);
+        }
+
+        .status-list {
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
+            gap: 8px;
+            margin-bottom: 16px;
         }
-        
-        .status-row {
+        .status-item {
             display: flex;
             justify-content: space-between;
-            align-items: center;
         }
-        
         .status-label {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
+            color: var(--color-text-secondary);
         }
-        
         .status-value {
-            color: var(--text-primary);
-            font-weight: 500;
+            font-weight: 600;
+        }
+        .status-value.success { color: var(--color-success-fg); }
+        .status-value.danger { color: var(--color-danger-fg); }
+        
+        .control-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
         }
         
-        .status-value.success {
-            color: var(--success);
-        }
-        
-        .status-value.danger {
-            color: var(--danger);
-        }
-        
-        /* 録音インジケーター */
-        .recording-indicator {
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--danger);
-            border-radius: 12px;
-            padding: 2rem;
+        .empty-state {
+            padding: 32px;
             text-align: center;
-            margin-bottom: 1.5rem;
-            position: relative;
-            overflow: hidden;
+            color: var(--color-text-secondary);
         }
-        
-        .recording-indicator::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: -2px;
-            right: -2px;
-            bottom: -2px;
-            background: linear-gradient(45deg, transparent, var(--danger), transparent);
-            opacity: 0;
-            animation: pulse-border 2s linear infinite;
-            z-index: -1;
-        }
-        
-        @keyframes pulse-border {
-            0%, 100% { opacity: 0; }
-            50% { opacity: 1; }
-        }
-        
-        .recording-icon {
-            width: 48px;
-            height: 48px;
-            background-color: var(--danger);
-            border-radius: 50%;
-            margin: 0 auto 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            animation: pulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.1); opacity: 0.8; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        
-        .recording-timer {
-            font-size: 2.5rem;
-            font-weight: 700;
-            font-variant-numeric: tabular-nums;
-            margin: 0.5rem 0;
-            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .recording-filename {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-        }
-        
-        /* ファイルリスト */
-        .file-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        .file-item {
-            background-color: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.75rem 1rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.2s ease;
-        }
-        
-        .file-item:hover {
-            background-color: #2a2a2a;
-            border-color: var(--text-tertiary);
-        }
-        
-        .file-name {
-            color: var(--text-primary);
-            font-size: 0.875rem;
-            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
-            word-break: break-all;
-            flex: 1;
-        }
-        
-        .file-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-left: 1rem;
-        }
-        
-        .file-actions .button {
-            padding: 0.375rem 0.75rem;
-            font-size: 0.75rem;
-        }
-        
-        /* アラート */
-        .alert {
-            position: fixed;
-            top: 5rem;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 1rem 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px var(--shadow);
-            z-index: 200;
-            animation: slideDown 0.3s ease-out;
-            min-width: 300px;
-            text-align: center;
-        }
-        
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateX(-50%) translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(-50%) translateY(0);
-            }
-        }
-        
-        .alert-success {
-            background-color: var(--success);
-            color: white;
-        }
-        
-        .alert-error {
-            background-color: var(--danger);
-            color: white;
-        }
-        
-        .alert-info {
-            background-color: var(--accent-primary);
-            color: white;
-        }
-        
-        /* ローディングスピナー */
+
         .spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--text-tertiary);
-            border-top-color: var(--accent-primary);
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--color-border-default);
+            border-top-color: var(--color-accent-emphasis);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .recording-indicator {
+            background-color: #FFFBDD;
+            border: 1px solid #EAC54F;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
         }
-        
-        /* レスポンシブ */
-        @media (max-width: 768px) {
-            .header {
-                padding: 1rem;
-            }
-            
-            .main-content {
-                padding: 1rem;
-            }
-            
-            .card {
-                padding: 1rem;
-            }
-            
-            .button-group {
-                flex-direction: column;
-            }
-            
-            .button-group .button {
-                width: 100%;
-            }
-            
-            .recording-timer {
-                font-size: 2rem;
-            }
+        .recording-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: #BF8700;
         }
-        
-        /* 空状態 */
-        .empty-state {
+        .recording-body {
+            margin-top: 8px;
+            font-size: 24px;
+            font-weight: 600;
+            font-family: monospace;
             text-align: center;
-            padding: 3rem 1rem;
-            color: var(--text-tertiary);
         }
-        
-        .empty-state-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-            opacity: 0.5;
+        .recording-body small {
+            display: block;
+            font-size: 12px;
+            color: var(--color-text-secondary);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        .status-indicator-idle {
+            background-color: #F0F4F8;
+            color: #333;
+        }
+        .status-indicator-recording {
+            background-color: #E1F5FE;
+            color: #0277BD;
+        }
+        .status-indicator-error {
+            background-color: #FFEBEE;
+            color: #C62828;
+        }
+        .status-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+        }
+
+        .timer-display {
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .user-message {
+            padding: 8px;
+            border-radius: 6px;
+            margin-top: 8px;
+            display: none;
+        }
+        .user-message.message-info {
+            background-color: #E1F5FE;
+            color: #0277BD;
+        }
+        .user-message.message-success {
+            background-color: #E8F5E9;
+            color: #2E7D32;
+        }
+        .user-message.message-error {
+            background-color: #FFEBEE;
+            color: #C62828;
         }
     </style>
 </head>
 <body>
-    <div class="app-container">
-        <!-- ヘッダー -->
-        <header class="header">
-            <div class="header-content">
-                <div class="logo">
-                    <div class="logo-icon">🎙️</div>
-                    <span>録音コントローラー</span>
-                </div>
-                <button class="button button-secondary" onclick="debugBluetooth()">
-                    デバッグ情報
-                </button>
+
+    <header class="gh-header">
+        <svg height="24" aria-hidden="true" viewBox="0 0 16 16" version="1.1" width="24" class="gh-header-icon">
+            <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM3.5 8a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1h-1Zm2 0a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1h-1Zm2 0a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1h-1Zm2 0a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1h-1Z"></path>
+        </svg>
+        <span>ZeroPi-TeamsRecorder</span>
+    </header>
+
+    <div class="page-content">
+        <div class="repo-header">
+            <div class="repo-name">
+                <svg class="gh-header-icon" height="24" viewBox="0 0 16 16" version="1.1" width="24">
+                    <path fill-rule="evenodd" d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8zM5 12.25a.25.25 0 01.25-.25h3.5a.25.25 0 01.25.25v3.25a.25.25 0 01-.4.2l-1.45-1.087a.25.25 0 00-.3 0L5.4 15.7a.25.25 0 01-.4-.2v-3.25z"></path>
+                </svg>
+                <a href="#">Raspberry Pi</a> / <strong>Web Recorder</strong>
             </div>
-        </header>
-        
-        <!-- メインコンテンツ -->
-        <main class="main-content">
-            <!-- 録音インジケーター（録音中のみ表示） -->
-            <div class="recording-indicator" id="recording-indicator" style="display: none;">
-                <div class="recording-icon">●</div>
-                <div class="recording-timer" id="timer">00:00:00</div>
-                <div class="recording-filename" id="filename"></div>
-            </div>
-            
-            <!-- デバイス選択 -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">デバイス選択</h2>
-                    <button class="button button-secondary" onclick="refreshDevices()" id="refresh-btn">
-                        <span id="refresh-text">更新</span>
-                        <div id="refresh-spinner" class="spinner" style="display: none;"></div>
-                    </button>
-                </div>
-                
-                <div class="device-list" id="device-list">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📱</div>
-                        <p>デバイスを読み込み中...</p>
+            <div id="ip-address" class="text-muted" style="margin-top: 4px;">IP: -.--.--.--</div>
+        </div>
+
+        <div class="main-grid">
+            <div class="main-content">
+                <div class="recording-indicator" id="recording-indicator" style="display: none;">
+                    <div class="recording-header">
+                        <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-broadcast">
+                            <path d="M8 12.25a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"></path><path d="M5.25 8a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Z"></path>
+                        </svg>
+                        <span>録音中です...</span>
+                    </div>
+                    <div class="recording-body">
+                        <span id="timer">00:00:00</span>
+                        <small id="filename"></small>
                     </div>
                 </div>
-                
-                <div class="button-group">
-                    <button class="button button-success" onclick="saveSelectedDevice()" id="save-btn" disabled>
-                        設定を保存
-                    </button>
-                </div>
-            </div>
-            
-            <!-- 現在の設定 -->
-            <div class="card">
-                <h2 class="card-title">現在の設定</h2>
-                <div class="status-display">
-                    <div class="status-row">
-                        <span class="status-label">選択デバイス</span>
-                        <span class="status-value" id="selected-device-name">未選択</span>
+
+                <div class="Box">
+                    <div class="Box-header">
+                        <h3 class="Box-title">録音ファイル</h3>
                     </div>
-                    <div class="status-row">
-                        <span class="status-label">MACアドレス</span>
-                        <span class="status-value" id="selected-device-mac">-</span>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-label">接続状態</span>
-                        <span class="status-value" id="connection-status">-</span>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-label">ワーカー状態</span>
-                        <span class="status-value" id="worker-status">-</span>
-                    </div>
-                </div>
-                
-                <div class="button-group">
-                    <button class="button button-primary" onclick="startRecording()" id="start-btn" disabled>
-                        録音開始
-                    </button>
-                    <button class="button button-danger" onclick="stopRecording()" id="stop-btn" disabled>
-                        録音停止
-                    </button>
-                </div>
-            </div>
-            
-            <!-- 録音ファイル -->
-            <div class="card">
-                <h2 class="card-title">録音ファイル</h2>
-                <div class="file-list" id="file-list">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📁</div>
-                        <p>ファイルを取得中...</p>
+                    <div id="file-list" class="Box-body" style="padding: 0;">
+                        <!-- ファイルリストがここに動的に挿入されます -->
                     </div>
                 </div>
             </div>
-        </main>
+
+            <div class="sidebar">
+                <div class="Box">
+                    <div class="Box-header">
+                        <h3 class="Box-title">コントロール</h3>
+                    </div>
+                    <div class="Box-body">
+                        <div id="status-indicator" class="status-indicator-idle">
+                            <span class="status-icon"></span>
+                            <span id="status-text">待機中</span>
+                        </div>
+                        <div id="timer" class="timer-display">00:00:00</div>
+                        
+                        <div class="control-buttons">
+                            <button id="start-button" class="btn btn-primary" onclick="startRecording()" disabled>
+                                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.379 5.227A.75.75 0 0 1 7.5 5.75v4.5a.75.75 0 0 1-1.121.623l-3.5-2.25a.75.75 0 0 1 0-1.246l3.5-2.25z"></path></svg>
+                                録音開始
+                            </button>
+                            <button id="stop-button" class="btn btn-danger" onclick="stopRecording()" disabled>
+                                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.25 6.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3.5 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"></path></svg>
+                                録音停止
+                            </button>
+                        </div>
+                        <div id="user-message" class="user-message"></div>
+                    </div>
+                </div>
+
+                <div class="Box" style="margin-top: 24px;">
+                    <div class="Box-header">
+                        <h3 class="Box-title">Bluetoothデバイス</h3>
+                        <button class="btn" onclick="refreshDevices()" id="refresh-btn">
+                            <span id="refresh-text">更新</span>
+                            <div id="refresh-spinner" class="spinner" style="display: none;"></div>
+                        </button>
+                    </div>
+                    <div id="device-list">
+                        <div class="empty-state">
+                            <p>デバイスを読み込み中...</p>
+                        </div>
+                    </div>
+                    <div class="Box-footer" style="padding: 8px 16px; border-top: 1px solid var(--color-border-default);">
+                        <button class="btn" style="width: 100%;" onclick="saveSelectedDevice()" id="save-btn" disabled>
+                            このデバイスを使用する
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
-        let timerInterval = null;
-        let startTime = null;
         let selectedDevice = null;
-        let devicesData = [];
-        
+        let statusInterval;
+        let timerInterval;
+        let recordingStartTime;
+
+        // === 初期化処理 ===
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDevices();
+            updateFileList();
+            statusInterval = setInterval(updateStatus, 1000); // 1秒ごとにステータスを更新
+        });
+
+        // === UI更新関数 ===
         function showMessage(text, type = 'info') {
-            const alert = document.createElement('div');
-            alert.className = `alert alert-${type}`;
-            alert.textContent = text;
-            document.body.appendChild(alert);
-            
-            setTimeout(() => {
-                alert.style.animation = 'slideDown 0.3s ease-out reverse';
-                setTimeout(() => alert.remove(), 300);
-            }, 4000);
+            const messageEl = document.getElementById('user-message');
+            messageEl.textContent = text;
+            messageEl.className = `user-message message-${type}`;
+            messageEl.style.display = 'block';
+            setTimeout(() => { messageEl.style.display = 'none'; }, 5000);
         }
-        
-        async function refreshDevices() {
-            const refreshText = document.getElementById('refresh-text');
-            const refreshSpinner = document.getElementById('refresh-spinner');
-            const refreshBtn = document.getElementById('refresh-btn');
-            
-            refreshBtn.disabled = true;
-            refreshText.style.display = 'none';
-            refreshSpinner.style.display = 'block';
-            
+
+        function updateButtonStates() {
+            const startBtn = document.getElementById('start-button');
+            const stopBtn = document.getElementById('stop-button');
+            const isRecording = document.getElementById('status-indicator').classList.contains('status-indicator-recording');
+
+            startBtn.disabled = isRecording || !selectedDevice;
+            stopBtn.disabled = !isRecording;
+        }
+
+        function updateTimer() {
+            if (!recordingStartTime) return;
+            const now = Date.now();
+            const elapsed = Math.floor((now - recordingStartTime) / 1000);
+            const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+            const seconds = String(elapsed % 60).padStart(2, '0');
+            document.getElementById('timer').textContent = `${hours}:${minutes}:${seconds}`;
+        }
+
+        // === データ取得・操作関数 ===
+        async function loadDevices() {
+            const deviceList = document.getElementById('device-list');
+            deviceList.innerHTML = ''; // リストをクリア
+
             try {
                 const response = await fetch('/get_devices');
                 const data = await response.json();
                 
-                devicesData = data.devices || [];
-                
-                const deviceList = document.getElementById('device-list');
-                deviceList.innerHTML = '';
-                
-                if (devicesData.length > 0) {
-                    devicesData.forEach((device, index) => {
-                        const isSelected = selectedDevice && 
-                                         selectedDevice.mac === device.mac && 
-                                         selectedDevice.adapter === device.adapter;
-                        
-                        const deviceDiv = document.createElement('div');
-                        deviceDiv.className = 'device-item' + (isSelected ? ' selected' : '');
-                        deviceDiv.setAttribute('data-index', index);
-                        
-                        deviceDiv.innerHTML = `
-                            <div class="device-name">${device.name}</div>
-                            <div class="device-info">
-                                <span>${device.mac}</span>
-                                <span>${device.adapter_name}</span>
-                                <span class="device-status ${device.connected ? 'connected' : 'paired'}">
-                                    <span class="status-dot"></span>
-                                    ${device.connected ? '接続中' : 'ペアリング済み'}
-                                </span>
+                if (data.devices && data.devices.length > 0) {
+                    data.devices.forEach(device => {
+                        const row = document.createElement('div');
+                        row.className = 'Box-row';
+                        row.onclick = () => selectDevice(row, device.mac_address, device.name);
+
+                        let statusBadge = '';
+                        if (device.connected) {
+                            statusBadge = `<span class="status-badge connected"><span class="status-dot"></span>接続済み</span>`;
+                        } else if (device.paired) {
+                            statusBadge = `<span class="status-badge paired">ペアリング済み</span>`;
+                        }
+
+                        row.innerHTML = `
+                            <div class="Box-row-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M3.75 0a.75.75 0 0 0-1.5 0v4.333L.97 3.05a.75.75 0 0 0-1.06 1.06L2.5 6.75v2.5L-.11 11.89a.75.75 0 1 0 1.06 1.06l1.28-1.28V16a.75.75 0 0 0 1.5 0v-4.333l1.28 1.28a.75.75 0 0 0 1.06-1.06L3.75 9.25v-2.5l2.61-2.64a.75.75 0 0 0-1.06-1.06L3.75 4.333V0Zm1.5 6L7.86 3.39a.75.75 0 0 1 1.06 1.06L6.31 7.06a.75.75 0 0 1 0 1.06l2.61 2.61a.75.75 0 1 1-1.06 1.06L5.25 9.18v-3.18Zm3.69 2.61L11.55 6l-2.61-2.61a.75.75 0 0 1 1.06-1.06l3.16 3.16a.75.75 0 0 1 0 1.06l-3.16 3.16a.75.75 0 1 1-1.06-1.06Z"></path>
                             </div>
+                            <div class="Box-row-content">
+                                <span class="text-bold">${device.name}</span>
+                                <div class="text-muted">${device.mac_address}</div>
+                            </div>
+                            ${statusBadge}
                         `;
-                        
-                        deviceDiv.addEventListener('click', function() {
-                            selectDevice(device.mac, device.name, device.adapter, this);
-                        });
-                        
-                        deviceList.appendChild(deviceDiv);
+                        deviceList.appendChild(row);
                     });
                 } else {
-                    deviceList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📱</div>
-                            <p>ペアリング済みデバイスがありません</p>
-                        </div>
-                    `;
+                    deviceList.innerHTML = '<div class="Box-row">利用可能なデバイスが見つかりません。</div>';
                 }
-                
-                if (data.current_device) {
-                    selectedDevice = data.current_device;
-                    updateSelectedDeviceDisplay();
-                }
-                
             } catch (error) {
-                showMessage('デバイス一覧の取得に失敗しました', 'error');
-            } finally {
-                refreshBtn.disabled = false;
-                refreshText.style.display = 'inline';
-                refreshSpinner.style.display = 'none';
+                console.error('デバイス一覧の取得に失敗:', error);
+                deviceList.innerHTML = '<div class="Box-row text-danger">デバイス一覧の取得に失敗しました。</div>';
             }
         }
-        
-        function selectDevice(mac, name, adapter, element) {
-            selectedDevice = { mac, name, adapter };
-            
-            document.querySelectorAll('.device-item').forEach(item => {
-                item.classList.remove('selected');
-            });
-            
-            if (element) {
-                element.classList.add('selected');
-            }
-            
-            updateSelectedDeviceDisplay();
-            document.getElementById('save-btn').disabled = false;
-        }
-        
-        function updateSelectedDeviceDisplay() {
-            if (selectedDevice) {
-                document.getElementById('selected-device-name').textContent = selectedDevice.name;
-                document.getElementById('selected-device-mac').textContent = selectedDevice.mac;
-                document.getElementById('connection-status').textContent = '確認中...';
-                document.getElementById('start-btn').disabled = false;
-                
-                checkConnection();
-            } else {
-                document.getElementById('selected-device-name').textContent = '未選択';
-                document.getElementById('selected-device-mac').textContent = '-';
-                document.getElementById('connection-status').textContent = '-';
-                document.getElementById('start-btn').disabled = true;
-            }
-        }
-        
-        async function saveSelectedDevice() {
-            if (!selectedDevice) {
-                showMessage('デバイスを選択してください', 'error');
-                return;
-            }
-            
+
+        async function selectDevice(element, mac_address, name) {
+            // 既存の選択を解除
+            document.querySelectorAll('#device-list .Box-row').forEach(el => el.classList.remove('selected'));
+            // 新しいデバイスを選択
+            element.classList.add('selected');
+            selectedDevice = mac_address;
+            showMessage(`デバイス「${name}」を選択しました。`);
+
             try {
                 const response = await fetch('/save_device', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(selectedDevice)
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device: mac_address })
                 });
-                const data = await response.json();
-                
-                if (data.success) {
-                    showMessage('設定を保存しました', 'success');
-                    document.getElementById('save-btn').disabled = true;
+                const result = await response.json();
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    // 接続状態をチェックしてUIを更新
+                    await checkConnection(mac_address);
                 } else {
-                    showMessage(data.message || '保存に失敗しました', 'error');
+                    showMessage(result.message, 'error');
+                    selectedDevice = null;
+                    element.classList.remove('selected');
                 }
             } catch (error) {
-                showMessage('設定の保存中にエラーが発生しました', 'error');
+                showMessage('デバイスの保存に失敗しました。', 'error');
+                console.error('Error saving device:', error);
             }
+            updateButtonStates();
         }
-        
-        async function checkConnection() {
-            if (!selectedDevice) return;
-            
+
+        async function checkConnection(mac_address) {
             try {
-                const response = await fetch('/check_connection', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(selectedDevice)
-                });
+                const response = await fetch(`/check_connection?device=${mac_address}`);
                 const data = await response.json();
-                
-                const statusEl = document.getElementById('connection-status');
                 if (data.connected) {
-                    statusEl.textContent = '接続済み';
-                    statusEl.className = 'status-value success';
+                    showMessage(`デバイス ${mac_address} に接続済みです。`, 'success');
                 } else {
-                    statusEl.textContent = '未接続';
-                    statusEl.className = 'status-value danger';
+                    showMessage(`デバイス ${mac_address} への接続を試みています...`, 'info');
                 }
+                // デバイスリストを再読み込みして状態バッジを更新
+                loadDevices();
             } catch (error) {
                 console.error('接続確認エラー:', error);
             }
         }
-        
-        async function startRecording() {
-            if (!selectedDevice) {
-                showMessage('録音デバイスを選択してください', 'error');
-                return;
-            }
-            
-            const duration = prompt('録音時間を分で入力してください（空欄で2時間）:', '120');
-            if (duration === null) return;
-            
-            const minutes = duration || 120;
-            
-            try {
-                const response = await fetch('/start_recording', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        duration: parseInt(minutes),
-                        device: selectedDevice
-                    })
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    document.getElementById('start-btn').disabled = true;
-                    document.getElementById('stop-btn').disabled = false;
-                    document.getElementById('recording-indicator').style.display = 'block';
-                    
-                    startTime = Date.now();
-                    timerInterval = setInterval(updateTimer, 1000);
-                    
-                    showMessage('録音を開始しました', 'success');
-                } else {
-                    showMessage(data.message || '録音開始に失敗しました', 'error');
-                }
-            } catch (error) {
-                showMessage('録音開始中にエラーが発生しました', 'error');
-            }
-        }
-        
-        async function stopRecording() {
-            const stopBtn = document.getElementById('stop-btn');
-            if (stopBtn.disabled) return;
-            stopBtn.disabled = true;
-            
-            try {
-                const response = await fetch('/stop_recording', {method: 'POST'});
-                const data = await response.json();
-                
-                if (data.success) {
-                    document.getElementById('start-btn').disabled = false;
-                    document.getElementById('recording-indicator').style.display = 'none';
-                    
-                    if (timerInterval) {
-                        clearInterval(timerInterval);
-                        timerInterval = null;
-                    }
-                    
-                    showMessage('録音を停止しました', 'success');
-                    loadFiles();
-                } else {
-                    showMessage(data.message || '録音停止に失敗しました', 'error');
-                    stopBtn.disabled = false;
-                }
-            } catch (error) {
-                showMessage('録音停止中にエラーが発生しました', 'error');
-                stopBtn.disabled = false;
-            }
-        }
-        
-        function updateTimer() {
-            if (!startTime) return;
-            
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const hours = Math.floor(elapsed / 3600);
-            const minutes = Math.floor((elapsed % 3600) / 60);
-            const seconds = elapsed % 60;
-            
-            const timer = document.getElementById('timer');
-            timer.textContent = 
-                String(hours).padStart(2, '0') + ':' +
-                String(minutes).padStart(2, '0') + ':' +
-                String(seconds).padStart(2, '0');
-        }
-        
-        async function loadFiles() {
-            try {
-                const response = await fetch('/get_files');
-                const data = await response.json();
-                
-                const fileList = document.getElementById('file-list');
-                if (data.files && data.files.length > 0) {
-                    fileList.innerHTML = data.files.map(file => `
-                        <div class="file-item">
-                            <div class="file-name">${file}</div>
-                            <div class="file-actions">
-                                <button class="button button-primary" onclick="downloadFile('${file}')">
-                                    ダウンロード
-                                </button>
-                                <button class="button button-danger" onclick="deleteFile('${file}')">
-                                    削除
-                                </button>
-                            </div>
-                        </div>
-                    `).join('');
-                } else {
-                    fileList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📁</div>
-                            <p>録音ファイルがありません</p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('ファイル一覧の取得に失敗しました:', error);
-            }
-        }
-        
-        async function downloadFile(filename) {
-            try {
-                window.location.href = `/download/${filename}`;
-            } catch (error) {
-                showMessage('ダウンロードに失敗しました', 'error');
-            }
-        }
-        
-        async function deleteFile(filename) {
-            if (!confirm(`${filename} を削除しますか？`)) {
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/delete/${filename}`, {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    showMessage('ファイルを削除しました', 'success');
-                    loadFiles();
-                } else {
-                    showMessage(data.message || '削除に失敗しました', 'error');
-                }
-            } catch (error) {
-                showMessage('削除中にエラーが発生しました', 'error');
-            }
-        }
-        
-        async function getStatus() {
+
+        async function updateStatus() {
             try {
                 const response = await fetch('/get_status');
                 const data = await response.json();
-                
-                // ワーカー状態を更新
-                const workerStatus = document.getElementById('worker-status');
-                if (data.status === 'recording') {
-                    workerStatus.textContent = '録音中';
-                    workerStatus.className = 'status-value success';
-                } else if (data.status === 'idle') {
-                    workerStatus.textContent = 'アイドル';
-                    workerStatus.className = 'status-value';
-                } else if (data.status === 'offline') {
-                    workerStatus.textContent = 'オフライン';
-                    workerStatus.className = 'status-value danger';
-                } else {
-                    workerStatus.textContent = data.status || '不明';
-                    workerStatus.className = 'status-value';
-                }
-                
+
+                const statusIndicator = document.getElementById('status-indicator');
+                const statusText = document.getElementById('status-text');
+                const ipAddressEl = document.getElementById('ip-address');
+
+                ipAddressEl.textContent = `IP: ${data.ip_address || '-.--.--.--'}`;
+
                 if (data.recording) {
-                    document.getElementById('start-btn').disabled = true;
-                    document.getElementById('stop-btn').disabled = false;
-                    document.getElementById('recording-indicator').style.display = 'block';
-                    document.getElementById('filename').textContent = data.filename || '';
-                    
-                    if (data.start_time && !timerInterval) {
-                        startTime = data.start_time * 1000;
+                    statusIndicator.className = 'status-indicator-recording';
+                    statusText.textContent = `録音中: ${data.filename || ''}`;
+                    if (!timerInterval) {
+                        // サーバーの開始時間からタイマーを初期化
+                        recordingStartTime = Date.now() - ((data.start_time ? (Date.now() / 1000 - data.start_time) : 0) * 1000);
                         timerInterval = setInterval(updateTimer, 1000);
-                        updateTimer();
                     }
                 } else {
-                    document.getElementById('start-btn').disabled = selectedDevice ? false : true;
-                    document.getElementById('stop-btn').disabled = true;
-                    document.getElementById('recording-indicator').style.display = 'none';
+                    statusIndicator.className = 'status-indicator-idle';
+                    statusText.textContent = '待機中';
+                    if (data.status === 'error') {
+                        statusIndicator.className = 'status-indicator-error';
+                        statusText.textContent = `エラー: ${data.error_message}`;
+                    }
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                    document.getElementById('timer').textContent = '00:00:00';
+                }
+                updateButtonStates();
+            } catch (error) {
+                console.error('ステータスの更新に失敗:', error);
+                const statusIndicator = document.getElementById('status-indicator');
+                const statusText = document.getElementById('status-text');
+                statusIndicator.className = 'status-indicator-error';
+                statusText.textContent = 'サーバー接続断';
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        async function startRecording() {
+            if (!selectedDevice) {
+                showMessage('録音を開始する前にデバイスを選択してください。', 'error');
+                return;
+            }
+            showMessage('録音開始リクエストを送信しました...');
+            try {
+                const response = await fetch('/start_recording', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    updateStatus(); // すぐにステータスを更新
+                } else {
+                    showMessage(result.message, 'error');
                 }
             } catch (error) {
-                console.error('ステータス取得エラー:', error);
+                showMessage('録音の開始に失敗しました。', 'error');
+                console.error('Error starting recording:', error);
             }
         }
-        
-        async function debugBluetooth() {
+
+        async function stopRecording() {
+            showMessage('録音停止リクエストを送信しました...');
             try {
-                const response = await fetch('/debug_bluetooth');
-                const data = await response.json();
-                console.log('Debug Info:', data);
-                alert('デバッグ情報をコンソールに出力しました');
+                const response = await fetch('/stop_recording', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                } else {
+                    showMessage(result.message, 'error');
+                }
             } catch (error) {
-                alert('デバッグ情報の取得に失敗しました: ' + error);
+                showMessage('録音の停止に失敗しました。', 'error');
+                console.error('Error stopping recording:', error);
+            }
+            // UIを即座にリセット
+            clearInterval(timerInterval);
+            timerInterval = null;
+            document.getElementById('timer').textContent = '00:00:00';
+            document.getElementById('status-indicator').className = 'status-indicator-idle';
+            document.getElementById('status-text').textContent = '待機中';
+            updateButtonStates();
+            setTimeout(updateFileList, 1000); // ファイルリストの更新を少し遅らせる
+        }
+
+        async function updateFileList() {
+            try {
+                const response = await fetch('/get_files');
+                const files = await response.json();
+                const fileList = document.getElementById('file-list');
+                fileList.innerHTML = '';
+
+                if (files.length === 0) {
+                    fileList.innerHTML = '<div class="Box-row"><div class="Box-row-content">録音ファイルはありません。</div></div>';
+                    return;
+                }
+
+                files.forEach(file => {
+                    const row = document.createElement('div');
+                    row.className = 'Box-row';
+                    row.innerHTML = `
+                        <div class="Box-row-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M10.5 1.75a.75.75 0 0 0-1.5 0V3h-5V1.75a.75.75 0 0 0-1.5 0V3a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2V1.75Z"></path></svg>
+                        </div>
+                        <div class="Box-row-content">
+                            <span class="text-bold">${file.name}</span>
+                            <div class="text-muted">${file.size}</div>
+                        </div>
+                        <div class="Box-row-actions">
+                            <button class="btn" onclick="downloadFile('${file.name}')">ダウンロード</button>
+                            <button class="btn btn-danger-outline" onclick="deleteFile('${file.name}')">削除</button>
+                        </div>
+                    `;
+                    fileList.appendChild(row);
+                });
+            } catch (error) {
+                console.error('ファイルリストの取得に失敗:', error);
+                document.getElementById('file-list').innerHTML = '<div class="Box-row"><div class="Box-row-content text-danger">リストの取得に失敗しました。</div></div>';
             }
         }
-        
-        // グローバル関数として登録
-        window.downloadFile = downloadFile;
-        window.deleteFile = deleteFile;
-        
-        // 初期化
-        window.addEventListener('DOMContentLoaded', function() {
-            refreshDevices();
-            loadFiles();
-            getStatus();
-            
-            // 定期的に状態を更新
-            setInterval(getStatus, 2000);
-        });
+
+        function downloadFile(filename) {
+            window.location.href = `/download/${filename}`;
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm(`本当にファイル「${filename}」を削除しますか？`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`/delete/${filename}`, { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    updateFileList(); // リストを更新
+                } else {
+                    showMessage(result.message, 'error');
+                }
+            } catch (error) {
+                showMessage('ファイルの削除に失敗しました。', 'error');
+                console.error('Error deleting file:', error);
+            }
+        }
+
     </script>
 </body>
 </html>

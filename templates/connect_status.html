@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>接続ステータス</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 5em; }
+        .message { padding: 2em; border-radius: 8px; display: inline-block; }
+        .success { background: #e9f7ef; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+    {% if success %}
+        <div class="message success">
+            <h1>接続成功</h1>
+            <p>{{ message }}</p>
+            <p>3秒後にシステムが再起動します。iPhoneを目的のWi-Fiに接続し直してください。</p>
+        </div>
+    {% else %}
+        <div class="message error">
+            <h1>接続失敗</h1>
+            <p>{{ message }}</p>
+            <p><a href="/setup">前のページに戻って再試行する</a></p>
+        </div>
+    {% endif %}
+</body>
+</html>

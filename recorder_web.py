@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Raspberry Pi Web録音コントローラー（デバイス選択機能付き）
+Raspberry Pi Web録音コントローラー（デバイス選択・ネットワーク設定機能付き）
 iPhoneからアクセスできるWebインターフェース付き録音アプリ
 """
 
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
 import os
 import subprocess
 import threading
@@ -15,6 +15,7 @@ import logging
 import json
 import socket
 import psutil
+import argparse
 
 # Flaskアプリの設定
 app = Flask(__name__)
@@ -29,6 +30,78 @@ STATUS_FILE = "recorder_status.json"
 COMMAND_FILE = "recorder_command.json"
 WORKER_SCRIPT = "recorder_worker.py"
 
+# --- ここから大幅な変更・追加 ---
+
+# === ネットワーク関連の機能を追加 ===
+def get_ip_address():
+    """サーバーのIPアドレスを取得"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        # APモードの場合などはこちら
+        try:
+            result = subprocess.check_output("hostname -I", shell=True).decode().strip()
+            return result.split()[0]
+        except Exception:
+            return "127.0.0.1"
+
+def is_wifi_connected():
+    """Wi-Fiに接続されているか確認"""
+    try:
+        # `iwgetid` は接続中のWi-Fi名(SSID)を返す。接続してなければ空。
+        result = subprocess.check_output("iwgetid -r", shell=True).decode().strip()
+        return bool(result)
+    except subprocess.CalledProcessError:
+        return False
+
+def scan_wifi_networks():
+    """利用可能なWi-Fiネットワークをスキャン"""
+    networks = []
+    try:
+        # `nmcli` を使ってデバイス一覧を取得し、Wi-Fiデバイス名を探す
+        result = subprocess.check_output("nmcli -t -f DEVICE,TYPE device", shell=True).decode()
+        wifi_device = None
+        for line in result.strip().split('\n'):
+            dev, dev_type = line.split(':')
+            if dev_type == 'wifi':
+                wifi_device = dev
+                break
+        
+        if not wifi_device:
+            logging.warning("Wi-Fiデバイスが見つかりません。")
+            return []
+
+        # Wi-Fiネットワークをスキャン
+        scan_cmd = f"sudo nmcli --get-values SSID,SIGNAL,SECURITY device wifi list ifname {wifi_device}"
+        result = subprocess.check_output(scan_cmd, shell=True).decode()
+        
+        seen_ssids = set()
+        for line in result.strip().split('\n\n'):
+            parts = line.split(':')
+            if len(parts) >= 3:
+                ssid, signal, security = parts[0], parts[1], parts[2]
+                if ssid and ssid not in seen_ssids:
+                    networks.append({'ssid': ssid, 'signal': int(signal), 'security': security})
+                    seen_ssids.add(ssid)
+        
+        return sorted(networks, key=lambda x: x['signal'], reverse=True)
+
+    except Exception as e:
+        logging.error(f"Wi-Fiスキャンエラー: {e}")
+        return []
+
+def connect_to_wifi(ssid, password):
+    """指定されたWi-Fiに接続"""
+    try:
+        connect_cmd = f'sudo nmcli device wifi connect "{ssid}" password "{password}"' if password else f'sudo nmcli device wifi connect "{ssid}"'
+        subprocess.check_output(connect_cmd, shell=True, stderr=subprocess.STDOUT)
+        return True, f"{ssid}への接続に成功しました。システムを再起動します。"
+    except subprocess.CalledProcessError as e:
+        return False, f"Wi-Fiへの接続に失敗しました: {e.output.decode()}"
 # グローバル変数
 selected_device = None
 selected_adapter = None
@@ -315,7 +388,30 @@ def check_device_connection(device_info):
 @app.route('/')
 def index():
     """メインページ"""
+    if is_setup_mode:
+        return redirect(url_for('setup'))
     return render_template('index.html')
+
+@app.route('/setup', methods=['GET'])
+def setup():
+    """Wi-Fi設定ページ"""
+    networks = scan_wifi_networks()
+    return render_template('setup.html', networks=networks)
+
+@app.route('/connect', methods=['POST'])
+def connect():
+    """Wi-Fi接続処理"""
+    ssid = request.form.get('ssid')
+    password = request.form.get('password')
+    success, message = connect_to_wifi(ssid, password)
+    
+    if success:
+        def reboot_pi():
+            time.sleep(3)
+            os.system("sudo reboot")
+        threading.Thread(target=reboot_pi).start()
+        
+    return render_template('connect_status.html', success=success, message=message)
 
 @app.route('/get_devices')
 def get_devices():
@@ -491,14 +587,18 @@ def stop_recording():
 def get_status():
     """録音状態取得API"""
     status = get_worker_status()
+    response_data = {}
     
     if status:
-        return jsonify(status)
+        response_data = status
     else:
-        return jsonify({
+        response_data = {
             'recording': False,
             'status': 'offline'
-        })
+        }
+    
+    response_data['ip_address'] = get_ip_address()
+    return jsonify(response_data)
 
 @app.route('/get_files')
 def get_files():
@@ -616,51 +716,27 @@ def cleanup():
             pass
 
 if __name__ == '__main__':
-    # 設定を読み込む
-    load_config()
+    parser = argparse.ArgumentParser(description="Raspberry Pi Web Recorder")
+    parser.add_argument('--setup', action='store_true', help='Run in Wi-Fi setup mode')
+    args = parser.parse_args()
     
-    # 利用可能なポートを探す関数
-    def find_available_port(start_port=5000, max_attempts=10):
-        for port in range(start_port, start_port + max_attempts):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                sock.bind(('', port))
-                sock.close()
-                return port
-            except OSError:
-                continue
-        return None
-    
-    # 利用可能なポートを探す
-    port = find_available_port()
-    if port is None:
-        print("エラー: 利用可能なポートが見つかりません")
-        sys.exit(1)
-    
-    # サーバー起動時のメッセージ
+    is_setup_mode = args.setup
+
+    if not is_setup_mode:
+        load_config()
+        if not start_worker_process():
+            print("エラー: ワーカープロセスの起動に失敗しました")
+            sys.exit(1)
+
     print("=" * 50)
     print("Raspberry Pi Web録音コントローラー")
-    print("=" * 50)
-    
-    # ワーカープロセスを起動
-    if not start_worker_process():
-        print("エラー: ワーカープロセスの起動に失敗しました")
-        sys.exit(1)
-    
-    if selected_device:
-        print(f"保存済みデバイス: {selected_device.get('name')}")
-        print(f"MACアドレス: {selected_device.get('mac')}")
-    else:
-        print("デバイスが選択されていません")
-    print("=" * 50)
-    print("Webサーバーを起動中...")
-    print(f"アクセスURL: http://[RaspberryPiのIPアドレス]:{port}")
-    print("Ctrl+C で終了")
+    if is_setup_mode:
+        print("--- Wi-Fi設定モード ---")
     print("=" * 50)
     
     try:
-        # Flaskアプリを起動
-        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+        # ポートを80番に固定して、ブラウザでポート番号入力を不要にする
+        app.run(host='0.0.0.0', port=80, debug=False)
     except KeyboardInterrupt:
         print("サーバーを停止します...")
     except Exception as e:
@@ -668,5 +744,6 @@ if __name__ == '__main__':
         import traceback
         traceback.print_exc()
     finally:
-        cleanup()
+        if not is_setup_mode:
+            cleanup()
         print("サーバーを終了しました")
