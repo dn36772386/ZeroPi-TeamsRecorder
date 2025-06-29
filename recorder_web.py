@@ -24,11 +24,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# 設定ファイル
-CONFIG_FILE = "recorder_config.json"
-STATUS_FILE = "recorder_status.json"
-COMMAND_FILE = "recorder_command.json"
-WORKER_SCRIPT = "recorder_worker.py"
+# このスクリプト自身の場所を基準に、絶対パスを生成します
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 設定ファイルを、絶対パスを使って指定します
+CONFIG_FILE = os.path.join(APP_ROOT, "recorder_config.json")
+STATUS_FILE = os.path.join(APP_ROOT, "recorder_status.json")
+COMMAND_FILE = os.path.join(APP_ROOT, "recorder_command.json")
+WORKER_SCRIPT = os.path.join(APP_ROOT, "recorder_worker.py")
+RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
 
 # --- ここから大幅な変更・追加 ---
 
@@ -122,15 +126,25 @@ def get_worker_status():
     try:
         if not os.path.exists(STATUS_FILE):
             return None
-            
+        
+        # ファイルが空の場合にJSONDecodeErrorが発生するのを防ぐ
+        if os.path.getsize(STATUS_FILE) == 0:
+            # 少し待ってからリトライするかもしれない
+            return None
+
         with open(STATUS_FILE, 'r') as f:
             status = json.load(f)
-            
+
         # ステータスが古すぎる場合はワーカーが死んでいる可能性
         if time.time() - status.get('updated_at', 0) > 10:
+            logging.warning("ステータスファイルが古いため、ワーカーは停止していると判断します。")
             return None
-            
+
         return status
+    except json.JSONDecodeError:
+        # ファイルが書き込み中の場合などに発生する可能性があるため、エラーとせずNoneを返す
+        logging.warning("ステータスファイルの読み込み中にJSONDecodeErrorが発生しました。")
+        return None
     except Exception as e:
         logging.error(f"ステータス取得エラー: {e}")
         return None
@@ -154,18 +168,19 @@ def start_worker_process():
         # 新しいワーカーを起動
         worker_process = subprocess.Popen(
             [sys.executable, WORKER_SCRIPT],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             start_new_session=True  # 親プロセスから独立
         )
         
         logging.info(f"ワーカープロセスを起動: PID {worker_process.pid}")
         
         # ワーカーの起動を待つ
-        for i in range(30):
+        # Piの起動直後などは時間がかかる可能性があるため、10秒待つ
+        for i in range(100):
             if get_worker_status():
                 return True
             time.sleep(0.1)
+        
+        logging.error("ワーカープロセスの起動確認がタイムアウトしました。ステータスファイルが生成されていません。")
         
         return False
         
@@ -605,7 +620,11 @@ def get_files():
     """録音ファイル一覧取得API"""
     logging.info("=== /get_files API called ===")
     try:
-        files = [f for f in os.listdir('.') if f.endswith('.ogg')]
+        # recordingsディレクトリが存在しない場合は作成する
+        if not os.path.exists(RECORDINGS_DIR):
+            os.makedirs(RECORDINGS_DIR)
+        # 正しい録音ディレクトリを参照するように修正
+        files = [f for f in os.listdir(RECORDINGS_DIR) if f.endswith('.ogg')]
         files.sort(reverse=True)  # 新しい順
         logging.info(f"Found {len(files)} OGG files")
         return jsonify({
@@ -632,11 +651,11 @@ def download_file(filename):
         if not filename.endswith('.ogg'):
             return jsonify({'error': 'OGGファイルのみダウンロード可能です'}), 400
         
-        filepath = os.path.join(os.getcwd(), filename)
+        filepath = os.path.join(RECORDINGS_DIR, filename)
         if not os.path.exists(filepath):
             return jsonify({'error': 'ファイルが見つかりません'}), 404
         
-        return send_file(filepath, as_attachment=True, attachment_filename=filename)
+        return send_file(filepath, as_attachment=True, download_name=filename) # download_nameは古いFlaskではattachment_filename
     
     except Exception as e:
         logging.error(f"ダウンロードエラー: {e}")
@@ -660,7 +679,7 @@ def delete_file(filename):
                 'message': 'OGGファイルのみ削除可能です'
             }), 400
         
-        filepath = os.path.join(os.getcwd(), filename)
+        filepath = os.path.join(RECORDINGS_DIR, filename)
         if os.path.exists(filepath):
             os.remove(filepath)
             logging.info(f"ファイル削除: {filename}")
@@ -724,9 +743,9 @@ if __name__ == '__main__':
 
     if not is_setup_mode:
         load_config()
+        # ワーカープロセスの起動を試みる。もし失敗しても、Webサーバーは終了しない。
         if not start_worker_process():
-            print("エラー: ワーカープロセスの起動に失敗しました")
-            sys.exit(1)
+            logging.warning("初回ワーカー起動に失敗しましたが、Webサーバーは起動を続けます。")
 
     print("=" * 50)
     print("Raspberry Pi Web録音コントローラー")
@@ -735,8 +754,8 @@ if __name__ == '__main__':
     print("=" * 50)
     
     try:
-        # ポートを80番に固定して、ブラウザでポート番号入力を不要にする
-        app.run(host='0.0.0.0', port=80, debug=False)
+        # ポートを8080番に固定して、ブラウザでポート番号入力を不要にする
+        app.run(host='0.0.0.0', port=8080, debug=False)
     except KeyboardInterrupt:
         print("サーバーを停止します...")
     except Exception as e:

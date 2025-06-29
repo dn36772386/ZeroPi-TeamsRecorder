@@ -4,20 +4,40 @@
 recorder_web.pyからの指示に基づき、実際の録音処理を担当する。
 """
 
+# --- このブロックを丸ごと追加してください ---
+import logging
+import os
+
+# このスクリプトの場所にログファイルを作成
+log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worker.log')
+
+# ロガーの設定
+worker_logger = logging.getLogger('WorkerLogger')
+worker_logger.setLevel(logging.INFO)
+handler = logging.FileHandler(log_file_path)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+worker_logger.addHandler(handler)
+
+worker_logger.info("--- ワーカーログ開始 ---")
+# --- ここまで追加 ---
+
 import pyaudio
 import time
 import json
-import os
 import subprocess
-import logging
 import threading
 from datetime import datetime
 
-# --- 定数 ---
-# Webアプリと状態を共有するためのファイル
-STATUS_FILE = "recorder_status.json"
-COMMAND_FILE = "recorder_command.json"
-RECORDINGS_DIR = "recordings"
+# --- 定数（絶対パスで指定） ---
+# このスクリプト自身の場所を基準に、絶対パスを生成します
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# Webアプリと状態を共有するためのファイルを、絶対パスで指定します
+STATUS_FILE = os.path.join(APP_ROOT, "recorder_status.json")
+COMMAND_FILE = os.path.join(APP_ROOT, "recorder_command.json")
+RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
+
 ASOUNDRC_PATH = os.path.expanduser("~/.asoundrc")
 
 # 録音設定
@@ -27,7 +47,7 @@ CHANNELS = 1
 RATE = 44100
 
 # --- ロギング設定 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- グローバル変数 ---
 status = {
@@ -47,11 +67,14 @@ def update_status(new_status=None):
     global status
     if new_status:
         status.update(new_status)
+    
+    # 常に最新のタイムスタンプを追加する
+    status['updated_at'] = time.time()
     try:
         with open(STATUS_FILE, 'w') as f:
             json.dump(status, f)
     except Exception as e:
-        logging.error(f"ステータスファイルの書き込みに失敗: {e}")
+        worker_logger.error(f"ステータスファイルの書き込みに失敗: {e}")
 
 def setup_asoundrc(device_mac):
     """指定されたBluetoothデバイスを使用するようにALSAを設定する"""
@@ -75,10 +98,10 @@ ctl.!default {{
     try:
         with open(ASOUNDRC_PATH, 'w') as f:
             f.write(asoundrc_content)
-        logging.info(f".asoundrcをデバイス {device_mac} 用に設定しました。")
+        worker_logger.info(f".asoundrcをデバイス {device_mac} 用に設定しました。")
         return True
     except Exception as e:
-        logging.error(f".asoundrcの設定に失敗: {e}")
+        worker_logger.error(f".asoundrcの設定に失敗: {e}")
         return False
 
 def record_audio_thread(device_mac, filename_base):
@@ -105,7 +128,7 @@ def record_audio_thread(device_mac, filename_base):
                         input=True,
                         frames_per_buffer=CHUNK)
         
-        logging.info("録音を開始します...")
+        worker_logger.info("録音を開始します...")
         update_status({
             'recording': True,
             'status': 'recording',
@@ -119,10 +142,10 @@ def record_audio_thread(device_mac, filename_base):
             data = stream.read(CHUNK)
             frames.append(data)
 
-        logging.info("録音を停止しています...")
+        worker_logger.info("録音を停止しています...")
 
     except Exception as e:
-        logging.error(f"PyAudioエラー: {e}")
+        worker_logger.error(f"PyAudioエラー: {e}")
         update_status({'status': 'error', 'error_message': f"録音デバイスエラー: {e}"})
         return
     finally:
@@ -130,7 +153,7 @@ def record_audio_thread(device_mac, filename_base):
             stream.stop_stream()
             stream.close()
         p.terminate()
-        logging.info("PyAudioを終了しました。")
+        worker_logger.info("PyAudioを終了しました。")
 
     # --- ファイル変換 ---
     try:
@@ -143,27 +166,27 @@ def record_audio_thread(device_mac, filename_base):
             wf.writeframes(b''.join(frames))
         
         # FFmpegでOGGに変換
-        logging.info(f"'{temp_wav_filename}' を '{final_ogg_filename}' に変換中...")
+        worker_logger.info(f"'{temp_wav_filename}' を '{final_ogg_filename}' に変換中...")
         subprocess.run(
             ['ffmpeg', '-i', temp_wav_filename, '-acodec', 'libvorbis', final_ogg_filename, '-y'],
             check=True, capture_output=True, text=True
         )
-        logging.info("変換が完了しました。")
+        worker_logger.info("変換が完了しました。")
         
         # 一時WAVファイルを削除
         os.remove(temp_wav_filename)
 
     except subprocess.CalledProcessError as e:
-        logging.error(f"FFmpegエラー: {e.stderr}")
+        worker_logger.error(f"FFmpegエラー: {e.stderr}")
         update_status({'status': 'error', 'error_message': f"ファイル変換失敗: {e.stderr}"})
         # 変換に失敗した場合でもWAVファイルは残す
     except Exception as e:
-        logging.error(f"ファイル保存エラー: {e}")
+        worker_logger.error(f"ファイル保存エラー: {e}")
         update_status({'status': 'error', 'error_message': f"ファイル保存エラー: {e}"})
 
     update_status({'recording': False, 'status': 'idle', 'start_time': None, 'filename': None})
     stop_recording_flag.clear()
-    logging.info("録音処理が完了しました。")
+    worker_logger.info("録音処理が完了しました。")
 
 def check_command():
     """コマンドファイルを確認し、処理を実行する"""
@@ -179,11 +202,11 @@ def check_command():
         os.remove(COMMAND_FILE)
         
         command = command_data.get('command')
-        logging.info(f"コマンドを受信: {command}")
+        worker_logger.info(f"コマンドを受信: {command}")
 
         if command == 'start':
             if status['recording']:
-                logging.warning("すでに録音中のため、新しい録音は開始しません。")
+                worker_logger.warning("すでに録音中のため、新しい録音は開始しません。")
                 return
             
             device = command_data.get('device')
@@ -202,17 +225,17 @@ def check_command():
             if status['recording']:
                 stop_recording_flag.set()
             else:
-                logging.warning("録音中ではないため、停止コマンドは無視します。")
+                worker_logger.warning("録音中ではないため、停止コマンドは無視します。")
 
         elif command == 'exit':
             if status['recording']:
                 stop_recording_flag.set()
                 time.sleep(2) # 録音スレッドの終了を待つ
             main_loop_running = False
-            logging.info("終了コマンドを受信しました。")
+            worker_logger.info("終了コマンドを受信しました。")
 
     except Exception as e:
-        logging.error(f"コマンド処理エラー: {e}")
+        worker_logger.error(f"コマンド処理エラー: {e}")
         if os.path.exists(COMMAND_FILE):
             os.remove(COMMAND_FILE)
 
@@ -221,23 +244,31 @@ def cleanup():
     update_status({'recording': False, 'status': 'offline'})
     if os.path.exists(COMMAND_FILE):
         os.remove(COMMAND_FILE)
-    logging.info("ワーカープロセスをクリーンアップしました。")
+    worker_logger.info("ワーカープロセスをクリーンアップしました。")
 
 
 if __name__ == '__main__':
     if not os.path.exists(RECORDINGS_DIR):
         os.makedirs(RECORDINGS_DIR)
 
-    # 起動時にステータスを初期化
-    update_status({'recording': False, 'status': 'idle'})
-    
     try:
-        logging.info("録音ワーカーが起動しました。コマンドを待機中...")
+        # 起動時にステータスを初期化
+        worker_logger.info(f"初期ステータスファイル書き込み試行: {STATUS_FILE}")
+        update_status({'recording': False, 'status': 'idle'})
+        worker_logger.info("初期ステータスファイル書き込み成功。")
+
+        worker_logger.info("コマンド待機ループを開始します...")
         while main_loop_running:
             check_command()
-            time.sleep(0.1)
+            # Webサーバーに生存を知らせるため、ステータスを定期的に更新する
+            update_status()
+            time.sleep(0.5)
+            
     except KeyboardInterrupt:
-        logging.info("キーボード割り込みにより終了します。")
+        worker_logger.info("キーボード割り込みにより終了します。")
+    except Exception as e:
+        # ループ開始前の致命的なエラーをログに記録
+        worker_logger.error(f"ワーカーのメイン処理で致命的なエラーが発生: {e}", exc_info=True)
     finally:
         cleanup()
-        logging.info("録音ワーカーがシャットダウンしました。")
+        worker_logger.info("録音ワーカーがシャットダウンしました。")

@@ -558,7 +558,14 @@
 
         async function checkConnection(mac_address) {
             try {
-                const response = await fetch(`/check_connection?device=${mac_address}`);
+                // GETではなく、サーバーの仕様に合わせてPOSTでリクエストを送信する
+                const response = await fetch('/check_connection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ mac: mac_address }) // データをJSON形式で送信
+                });
                 const data = await response.json();
                 if (data.connected) {
                     showMessage(`デバイス ${mac_address} に接続済みです。`, 'success');
@@ -660,38 +667,37 @@
         }
 
         async function updateFileList() {
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = '<div class="Box-row"><div class="spinner"></div>&nbsp;読み込み中...</div>'; // 読み込み中の表示
+
             try {
                 const response = await fetch('/get_files');
-                const files = await response.json();
-                const fileList = document.getElementById('file-list');
-                fileList.innerHTML = '';
+                const data = await response.json();
 
-                if (files.length === 0) {
-                    fileList.innerHTML = '<div class="Box-row"><div class="Box-row-content">録音ファイルはありません。</div></div>';
-                    return;
+                // data.files が配列であることを確認してから処理する
+                if (data && Array.isArray(data.files) && data.files.length > 0) {
+                    fileList.innerHTML = data.files.map(file => `
+                        <div class="Box-row">
+                            <div class="Box-row-icon">
+                                <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16">
+                                    <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586a.75.75 0 0 1 .53.22l2.914 2.914a.75.75 0 0 1 .22.53V14.25c0 .966-.784 1.75-1.75 1.75H3.75A1.75 1.75 0 0 1 2 14.25V1.75Z"></path>
+                                </svg>
+                            </div>
+                            <div class="Box-row-content">
+                                <a href="/download/${file}" style="text-decoration: none; color: inherit;">${file}</a>
+                            </div>
+                            <div class="Box-row-actions">
+                                <button class="btn" onclick="downloadFile('${file}')">Download</button>
+                                <button class="btn btn-danger" onclick="deleteFile('${file}')">Delete</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    fileList.innerHTML = '<div class="empty-state"><p>録音ファイルはありません。</p></div>';
                 }
-
-                files.forEach(file => {
-                    const row = document.createElement('div');
-                    row.className = 'Box-row';
-                    row.innerHTML = `
-                        <div class="Box-row-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M10.5 1.75a.75.75 0 0 0-1.5 0V3h-5V1.75a.75.75 0 0 0-1.5 0V3a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2V1.75Z"></path></svg>
-                        </div>
-                        <div class="Box-row-content">
-                            <span class="text-bold">${file.name}</span>
-                            <div class="text-muted">${file.size}</div>
-                        </div>
-                        <div class="Box-row-actions">
-                            <button class="btn" onclick="downloadFile('${file.name}')">ダウンロード</button>
-                            <button class="btn btn-danger-outline" onclick="deleteFile('${file.name}')">削除</button>
-                        </div>
-                    `;
-                    fileList.appendChild(row);
-                });
             } catch (error) {
                 console.error('ファイルリストの取得に失敗:', error);
-                document.getElementById('file-list').innerHTML = '<div class="Box-row"><div class="Box-row-content text-danger">リストの取得に失敗しました。</div></div>';
+                fileList.innerHTML = '<div class="empty-state"><p style="color: var(--color-danger-fg);">ファイルリストの取得に失敗しました。</p></div>';
             }
         }
 
