@@ -1,21 +1,16 @@
-# /etc/systemd/system/recorder.service
-
 [Unit]
 Description=ZeroPi Teams Recorder Service
 After=network.target
 
 [Service]
-# このサービスを実行するユーザー（piユーザーを推奨）
 User=nakajima
-# このサービスのグループ
 Group=nakajima
-
-# プログラムがあるディレクトリへのフルパス
 WorkingDirectory=/home/nakajima
-# 実行するコマンド（起動スクリプトを呼び出す）
+# 環境変数を追加
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="HOME=/home/nakajima"
+Environment="PULSE_RUNTIME_PATH=/run/user/1000/pulse"
 ExecStart=/usr/bin/python3 /home/nakajima/recorder_web.py
-
-# エラーで終了した場合、5秒後に再起動
 Restart=always
 RestartSec=5
 

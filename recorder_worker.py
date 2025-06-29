@@ -70,12 +70,39 @@ def update_status(new_status=None):
         status.update(new_status)
     
     # 常に最新のタイムスタンプを追加する
-    status['updated_at'] = time.time()
+    status['updated_at'] = time.time()    
     try:
         with open(STATUS_FILE, 'w') as f:
             json.dump(status, f)
     except Exception as e:
         worker_logger.error(f"ステータスファイルの書き込みに失敗: {e}")
+
+def find_pulse_audio_device(device_mac):
+    """PulseAudioから適切なデバイス（sourceまたはsink.monitor）を検索"""
+    try:
+        # MACアドレスを正規化（:を_に変換） 
+        normalized_mac = device_mac.replace(':', '_')
+        
+        # pactl list sourcesでソース一覧を取得
+        result = subprocess.run(['pactl', 'list', 'sources', 'short'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    source_name = parts[1]
+                    # sourceまたはsink.monitorでMACアドレスが含まれているものを探す
+                    if normalized_mac in source_name:
+                        worker_logger.info(f"PulseAudioデバイスを発見: {source_name}")
+                        return source_name
+        
+        worker_logger.warning(f"MACアドレス {device_mac} に対応するPulseAudioデバイスが見つかりません")
+        return None
+        
+    except Exception as e:
+        worker_logger.error(f"PulseAudioデバイス検索エラー: {e}")
+        return None
 
 def find_bluetooth_source(device_mac):
     """PulseAudioからBluetoothソースを検索"""
@@ -112,36 +139,32 @@ def find_bluetooth_source(device_mac):
         return None
 
 def record_audio_thread(device_mac, filename_base):
-    """録音を実行するスレッド（PulseAudio対応）"""
+    """ffmpegを使用した録音スレッド"""
     global status
     
-    temp_wav_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.wav")
     final_ogg_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
     process = None
 
     try:
-        # Bluetoothソースを探す
-        bluetooth_source = find_bluetooth_source(device_mac)
+        # PulseAudioデバイスを検索
+        source_name = find_pulse_audio_device(device_mac)
+        if not source_name:
+            raise Exception(f"Bluetoothデバイス {device_mac} が見つかりません")
+
+        # ffmpegで直接OGG録音
+        cmd = [
+            'ffmpeg',
+            '-f', 'pulse',
+            '-i', source_name,
+            '-acodec', 'libvorbis',
+            '-ab', '128k',  # ビットレート
+            '-y',  # 上書き許可
+            final_ogg_filename
+        ]
+
+        worker_logger.info(f"録音開始: {' '.join(cmd)}")
         
-        if bluetooth_source:
-            # PulseAudioのBluetoothソースから録音
-            cmd = ['parec', '-d', bluetooth_source, '--file-format=wav', temp_wav_filename]
-            worker_logger.info(f"PulseAudioで録音: {bluetooth_source}")
-        else:
-            # arecordのデバイスを確認
-            check_result = subprocess.run(['arecord', '-l'], capture_output=True, text=True)
-            worker_logger.info(f"利用可能なデバイス:\n{check_result.stdout}")
-            
-            if 'no soundcards found' in check_result.stdout:
-                # PulseAudioを使用
-                worker_logger.warning("arecordでデバイスが見つかりません。PulseAudioを使用します。")
-                cmd = ['parec', '--file-format=wav', temp_wav_filename]
-            else:
-                # arecordを使用（プラグデバイスを指定）
-                worker_logger.warning("Bluetoothソースが見つかりません。デフォルトデバイスを使用します。")
-                # -D pulse を使用してPulseAudio経由で録音
-                cmd = ['arecord', '-D', 'pulse', '-f', 'cd', '-t', 'wav', temp_wav_filename]
-        
+        # ステータスを先に更新
         update_status({
             'recording': True,
             'status': 'recording',
@@ -149,71 +172,77 @@ def record_audio_thread(device_mac, filename_base):
             'filename': os.path.basename(final_ogg_filename),
             'error_message': None
         })
+
+        # プロセス開始（stderrは破棄）
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,  # SIGINTを送るため
+            stderr=subprocess.DEVNULL  # バッファ溢れ防止
+        )
+
+        # 録音監視ループ
+        start_time = time.time()
+        last_size = 0
         
-        # 録音プロセスを開始
-        # shell=Trueを削除し、stderr出力を捕捉
-        process = subprocess.Popen(cmd, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-        worker_logger.info(f"録音を開始しました: {' '.join(cmd)}")
-        
-        # 停止フラグを監視
         while not stop_recording_flag.is_set():
+            # プロセスの生存確認
             if process.poll() is not None:
-                # プロセスが終了した場合
-                stderr_output = process.stderr.read().decode() if process.stderr else ""
-                if stderr_output:
-                    worker_logger.error(f"録音プロセスエラー: {stderr_output}")
+                worker_logger.warning("録音プロセスが予期せず終了")
                 break
-            time.sleep(0.1)
-        
-        # 録音を停止
+            
+            # ファイルサイズで進捗確認
+            if os.path.exists(final_ogg_filename):
+                current_size = os.path.getsize(final_ogg_filename)
+                if current_size > last_size:
+                    last_size = current_size
+                    # 録音継続中
+                elif time.time() - start_time > 10:
+                    # 10秒以上サイズが変わらない
+                    worker_logger.warning("録音が停止している可能性")
+            
+            # ステータス更新
+            update_status()
+            time.sleep(0.5)
+
+        # 適切な停止処理
         if process.poll() is None:
-            worker_logger.info("録音を停止しています...")
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            worker_logger.info("録音を停止します")
+            # ffmpegにqキーを送信（正常終了）
+            process.stdin.write(b'q')
+            process.stdin.flush()
+            
+            # 5秒待機
+            for _ in range(10):
+                if process.poll() is not None:
+                    break
+                time.sleep(0.5)
+            
+            # まだ終了していなければSIGTERM
+            if process.poll() is None:
+                process.terminate()
                 process.wait(timeout=5)
-            except ProcessLookupError:
-                # プロセスが既に終了している場合
-                pass
-            except subprocess.TimeoutExpired:
-                # 強制終了
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                process.wait()
-        
-        worker_logger.info("録音が停止されました")
+
+        worker_logger.info("録音が正常に終了しました")
+
+    except subprocess.TimeoutExpired:
+        worker_logger.error("プロセスの終了がタイムアウト")
+        process.kill()
         
     except Exception as e:
         worker_logger.error(f"録音エラー: {e}")
         update_status({'status': 'error', 'error_message': str(e)})
         if process and process.poll() is None:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-
-    # --- ファイル変換 ---
-    try:
-        if os.path.exists(temp_wav_filename) and os.path.getsize(temp_wav_filename) > 0:
-            # FFmpegでOGGに変換
-            worker_logger.info(f"'{temp_wav_filename}' を '{final_ogg_filename}' に変換中...")
-            subprocess.run(
-                ['ffmpeg', '-i', temp_wav_filename, '-acodec', 'libvorbis', final_ogg_filename, '-y'],
-                check=True, capture_output=True, text=True
-            )
-            worker_logger.info("変換が完了しました。")
-        
-            # 一時WAVファイルを削除
-            os.remove(temp_wav_filename)
-        else:
-            raise Exception("録音ファイルが空または存在しません")
-
-    except subprocess.CalledProcessError as e:
-        worker_logger.error(f"FFmpegエラー: {e.stderr}")
-        update_status({'status': 'error', 'error_message': f"ファイル変換失敗: {e.stderr}"})
-        # 変換に失敗した場合でもWAVファイルは残す
-    except Exception as e:
-        worker_logger.error(f"ファイル保存エラー: {e}")
-        update_status({'status': 'error', 'error_message': f"ファイル保存エラー: {e}"})
-
-    update_status({'recording': False, 'status': 'idle', 'start_time': None, 'filename': None})
-    stop_recording_flag.clear()
-    worker_logger.info("録音処理が完了しました。")
+            process.kill()
+    finally:
+        # クリーンアップ
+        update_status({
+            'recording': False,
+            'status': 'idle',
+            'start_time': None,
+            'filename': None
+        })
+        stop_recording_flag.clear()
+        worker_logger.info("録音処理が完了しました。")
 
 def check_command():
     """コマンドファイルを確認し、処理を実行する"""

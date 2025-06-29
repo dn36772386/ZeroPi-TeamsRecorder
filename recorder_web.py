@@ -431,12 +431,25 @@ def connect():
 @app.route('/get_devices')
 def get_devices():
     """Bluetoothデバイス一覧を取得"""
+    global selected_device, selected_adapter
     logging.info("=== /get_devices API called ===")
-    
     try:
         devices = get_bluetooth_devices()
         logging.info(f"Found {len(devices)} devices")
         
+        # --- iPhone自動選択ロジックを追加 ---
+        # まだデバイスが選択されていない場合、リストからiPhoneを探す
+        if not selected_device and any("iPhone" in d.get('name', '') for d in devices):
+            for device in devices:
+                if "iPhone" in device.get('name', ''):
+                    # selected_deviceに設定し、今後のために保存する
+                    selected_device = device
+                    selected_adapter = device.get('adapter')
+                    logging.info(f"デフォルトデバイスとしてiPhoneを自動選択: {device['name']}")
+                    save_config()
+                    break
+        # --- ここまで ---
+
         # デバイスの詳細をログに出力
         for device in devices:
             logging.info(f"Device: {device['name']} ({device['mac']}) on {device['adapter_name']}")
@@ -655,7 +668,7 @@ def download_file(filename):
         if not os.path.exists(filepath):
             return jsonify({'error': 'ファイルが見つかりません'}), 404
         
-        return send_file(filepath, as_attachment=True, download_name=filename) # download_nameは古いFlaskではattachment_filename
+        return send_file(filepath, as_attachment=True, attachment_filename=filename)
     
     except Exception as e:
         logging.error(f"ダウンロードエラー: {e}")
