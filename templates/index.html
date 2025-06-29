@@ -495,7 +495,7 @@
                     data.devices.forEach(device => {
                         const row = document.createElement('div');
                         row.className = 'Box-row';
-                        row.onclick = () => selectDevice(row, device.mac_address, device.name);
+                        row.onclick = () => selectDevice(row, device);
 
                         let statusBadge = '';
                         if (device.connected) {
@@ -510,7 +510,7 @@
                             </div>
                             <div class="Box-row-content">
                                 <span class="text-bold">${device.name}</span>
-                                <div class="text-muted">${device.mac_address}</div>
+                                <div class="text-muted">${device.mac}</div>
                             </div>
                             ${statusBadge}
                         `;
@@ -525,25 +525,25 @@
             }
         }
 
-        async function selectDevice(element, mac_address, name) {
+        async function selectDevice(element, device) {
             // 既存の選択を解除
             document.querySelectorAll('#device-list .Box-row').forEach(el => el.classList.remove('selected'));
             // 新しいデバイスを選択
             element.classList.add('selected');
-            selectedDevice = mac_address;
-            showMessage(`デバイス「${name}」を選択しました。`);
+            selectedDevice = device;
+            showMessage(`デバイス「${device.name}」を選択しました。`);
 
             try {
                 const response = await fetch('/save_device', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ device: mac_address })
+                    body: JSON.stringify(device)
                 });
                 const result = await response.json();
                 if (result.success) {
                     showMessage(result.message, 'success');
                     // 接続状態をチェックしてUIを更新
-                    await checkConnection(mac_address);
+                    await checkConnection(device.mac);
                 } else {
                     showMessage(result.message, 'error');
                     selectedDevice = null;
@@ -628,7 +628,14 @@
             }
             showMessage('録音開始リクエストを送信しました...');
             try {
-                const response = await fetch('/start_recording', { method: 'POST' });
+                const response = await fetch('/start_recording', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        device: selectedDevice,
+                        duration: 120
+                    })
+                });
                 const result = await response.json();
                 if (result.success) {
                     showMessage(result.message, 'success');
@@ -722,6 +729,25 @@
                 showMessage('ファイルの削除に失敗しました。', 'error');
                 console.error('Error deleting file:', error);
             }
+        }
+
+        // === 追加で必要な関数 ===
+        async function refreshDevices() {
+            const refreshText = document.getElementById('refresh-text');
+            const refreshSpinner = document.getElementById('refresh-spinner');
+            
+            refreshText.style.display = 'none';
+            refreshSpinner.style.display = 'block';
+            
+            await loadDevices();
+            
+            refreshText.style.display = 'inline';
+            refreshSpinner.style.display = 'none';
+        }
+
+        function saveSelectedDevice() {
+            // この関数は現在のフローでは不要（selectDevice内で自動保存）
+            showMessage('デバイスは自動的に保存されます', 'info');
         }
 
     </script>
