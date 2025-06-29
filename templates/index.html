@@ -3,299 +3,646 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Raspberry Pi 録音コントローラー</title>
+    <title>録音コントローラー | Raspberry Pi</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #2a2a2a;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --text-tertiary: #606060;
+            --accent-primary: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #10b981;
+            --success-hover: #059669;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --warning: #f59e0b;
+            --border: #333333;
+            --shadow: rgba(0, 0, 0, 0.5);
+        }
+        
+        * {
             margin: 0;
-            padding: 20px;
-            background-color: #f5f5f7;
-            color: #1d1d1f;
+            padding: 0;
+            box-sizing: border-box;
         }
-        .container {
-            max-width: 600px;
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        
+        .app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* ヘッダー */
+        .header {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header-content {
+            max-width: 1200px;
             margin: 0 auto;
-            background-color: white;
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        h1 {
-            text-align: center;
-            font-size: 28px;
-            margin-bottom: 30px;
-            color: #1d1d1f;
-        }
-        .status-card {
-            background-color: #f5f5f7;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .status-item {
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            margin: 10px 0;
-            font-size: 16px;
         }
-        .status-value {
-            font-weight: 600;
-        }
-        .status-value.connected {
-            color: #34c759;
-        }
-        .status-value.disconnected {
-            color: #ff3b30;
-        }
-        .device-selector {
-            background-color: #f5f5f7;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .device-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin: 15px 0;
-        }
-        .device-item {
-            padding: 15px;
-            margin: 8px 0;
-            background-color: white;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-            border: 2px solid transparent;
-        }
-        .device-item:hover {
-            background-color: #e5e5e7;
-        }
-        .device-item.selected {
-            border-color: #007aff;
-            background-color: #e8f2ff;
-        }
-        .device-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 5px;
-        }
-        .device-mac {
-            font-size: 14px;
-            color: #86868b;
-        }
-        .device-adapter {
-            font-size: 12px;
-            color: #86868b;
-            margin-top: 3px;
-        }
-        .device-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            margin-left: 10px;
-        }
-        .device-status.connected {
-            background-color: #d1f2d1;
-            color: #00691f;
-        }
-        .device-status.paired {
-            background-color: #d1e7ff;
-            color: #0051d5;
-        }
-        .button-container {
+        
+        .logo {
             display: flex;
-            gap: 15px;
-            margin: 30px 0;
-        }
-        button {
-            flex: 1;
-            padding: 18px;
-            font-size: 18px;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
             font-weight: 600;
-            border: none;
+        }
+        
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+        
+        /* メインコンテンツ */
+        .main-content {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        /* カード */
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
             border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px var(--shadow);
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px var(--shadow);
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        /* デバイスリスト */
+        .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+        
+        .device-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .device-list::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+        }
+        
+        .device-list::-webkit-scrollbar-thumb {
+            background: var(--text-tertiary);
+            border-radius: 3px;
+        }
+        
+        .device-item {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
             cursor: pointer;
-            transition: all 0.3s;
-            -webkit-tap-highlight-color: transparent;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
         }
-        .refresh-btn {
-            background-color: #5856d6;
+        
+        .device-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 3px;
+            height: 100%;
+            background-color: transparent;
+            transition: background-color 0.2s ease;
+        }
+        
+        .device-item:hover {
+            background-color: #2a2a2a;
+            border-color: var(--accent-primary);
+        }
+        
+        .device-item.selected {
+            background-color: rgba(59, 130, 246, 0.1);
+            border-color: var(--accent-primary);
+        }
+        
+        .device-item.selected::before {
+            background-color: var(--accent-primary);
+        }
+        
+        .device-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+        
+        .device-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        .device-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .device-status.connected {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+        
+        .device-status.paired {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: var(--accent-primary);
+        }
+        
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+        
+        /* ボタン */
+        .button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            outline: none;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .button::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .button:active::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .button-primary {
+            background-color: var(--accent-primary);
             color: white;
         }
-        .refresh-btn:hover:not(:disabled) {
-            background-color: #3e3bb3;
+        
+        .button-primary:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
         }
-        .save-btn {
-            background-color: #34c759;
+        
+        .button-success {
+            background-color: var(--success);
             color: white;
         }
-        .save-btn:hover:not(:disabled) {
-            background-color: #248a3d;
+        
+        .button-success:hover:not(:disabled) {
+            background-color: var(--success-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
         }
-        .start-btn {
-            background-color: #007aff;
+        
+        .button-danger {
+            background-color: var(--danger);
             color: white;
         }
-        .start-btn:hover:not(:disabled) {
-            background-color: #0051d5;
+        
+        .button-danger:hover:not(:disabled) {
+            background-color: var(--danger-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
         }
-        .stop-btn {
-            background-color: #ff3b30;
-            color: white;
+        
+        .button-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
         }
-        .stop-btn:hover:not(:disabled) {
-            background-color: #d70015;
+        
+        .button-secondary:hover:not(:disabled) {
+            background-color: #333333;
+            border-color: var(--text-tertiary);
         }
-        button:disabled {
+        
+        .button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }
-        #message {
-            text-align: center;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 12px;
-            font-weight: 500;
-            display: none;
+        
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
         }
-        .success {
-            background-color: #d1f2d1;
-            color: #00691f;
+        
+        .button-group .button {
+            flex: 1;
         }
-        .error {
-            background-color: #ffd4d1;
-            color: #c41e3a;
-        }
-        .info {
-            background-color: #d1e7ff;
-            color: #0051d5;
-        }
-        .recording-info {
-            text-align: center;
-            margin: 20px 0;
-            font-size: 18px;
-        }
-        #timer {
-            font-size: 36px;
-            font-weight: 700;
-            color: #007aff;
-            margin: 10px 0;
-        }
-        .files-section {
-            margin-top: 30px;
-            padding-top: 30px;
-            border-top: 1px solid #e5e5e7;
-        }
-        .file-list {
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #e5e5e7;
+        
+        /* ステータス表示 */
+        .status-display {
+            background-color: var(--bg-tertiary);
             border-radius: 8px;
-            padding: 10px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
         }
-        .file-item {
+        
+        .status-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px;
-            margin: 4px 0;
-            background-color: #f5f5f7;
-            border-radius: 6px;
         }
+        
+        .status-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        .status-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        .status-value.success {
+            color: var(--success);
+        }
+        
+        .status-value.danger {
+            color: var(--danger);
+        }
+        
+        /* 録音インジケーター */
+        .recording-indicator {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--danger);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .recording-indicator::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, transparent, var(--danger), transparent);
+            opacity: 0;
+            animation: pulse-border 2s linear infinite;
+            z-index: -1;
+        }
+        
+        @keyframes pulse-border {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+        
+        .recording-icon {
+            width: 48px;
+            height: 48px;
+            background-color: var(--danger);
+            border-radius: 50%;
+            margin: 0 auto 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .recording-timer {
+            font-size: 2.5rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            margin: 0.5rem 0;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .recording-filename {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        /* ファイルリスト */
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+        
+        .file-item:hover {
+            background-color: #2a2a2a;
+            border-color: var(--text-tertiary);
+        }
+        
         .file-name {
-            font-size: 14px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
             word-break: break-all;
             flex: 1;
         }
+        
         .file-actions {
             display: flex;
-            gap: 8px;
-            margin-left: 10px;
+            gap: 0.5rem;
+            margin-left: 1rem;
         }
-        .file-actions button {
-            padding: 4px 8px;
-            font-size: 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            border: none;
+        
+        .file-actions .button {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
         }
-        .loader {
-            display: inline-block;
+        
+        /* アラート */
+        .alert {
+            position: fixed;
+            top: 5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px var(--shadow);
+            z-index: 200;
+            animation: slideDown 0.3s ease-out;
+            min-width: 300px;
+            text-align: center;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+        
+        .alert-success {
+            background-color: var(--success);
+            color: white;
+        }
+        
+        .alert-error {
+            background-color: var(--danger);
+            color: white;
+        }
+        
+        .alert-info {
+            background-color: var(--accent-primary);
+            color: white;
+        }
+        
+        /* ローディングスピナー */
+        .spinner {
             width: 20px;
             height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #007aff;
+            border: 2px solid var(--text-tertiary);
+            border-top-color: var(--accent-primary);
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
         }
+        
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* レスポンシブ */
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .card {
+                padding: 1rem;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .button-group .button {
+                width: 100%;
+            }
+            
+            .recording-timer {
+                font-size: 2rem;
+            }
+        }
+        
+        /* 空状態 */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-tertiary);
+        }
+        
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎙️ 録音コントローラー</h1>
-        
-        <div class="device-selector">
-            <h3>録音デバイス選択</h3>
-            <div class="button-container">
-                <button class="refresh-btn" onclick="refreshDevices()">
-                    <span id="refresh-text">デバイス更新</span>
-                    <span id="refresh-loader" style="display: none;" class="loader"></span>
-                </button>
-                <button class="save-btn" onclick="saveSelectedDevice()" id="save-btn" disabled>
-                    設定を保存
+    <div class="app-container">
+        <!-- ヘッダー -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">🎙️</div>
+                    <span>録音コントローラー</span>
+                </div>
+                <button class="button button-secondary" onclick="debugBluetooth()">
+                    デバッグ情報
                 </button>
             </div>
-            <div class="device-list" id="device-list">
-                <div style="text-align: center; color: #86868b;">デバイスを読み込み中...</div>
+        </header>
+        
+        <!-- メインコンテンツ -->
+        <main class="main-content">
+            <!-- 録音インジケーター（録音中のみ表示） -->
+            <div class="recording-indicator" id="recording-indicator" style="display: none;">
+                <div class="recording-icon">●</div>
+                <div class="recording-timer" id="timer">00:00:00</div>
+                <div class="recording-filename" id="filename"></div>
             </div>
-        </div>
-        
-        <div class="status-card">
-            <h3>現在の設定</h3>
-            <div class="status-item">
-                <span>選択デバイス:</span>
-                <span class="status-value" id="selected-device-name">未選択</span>
+            
+            <!-- デバイス選択 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">デバイス選択</h2>
+                    <button class="button button-secondary" onclick="refreshDevices()" id="refresh-btn">
+                        <span id="refresh-text">更新</span>
+                        <div id="refresh-spinner" class="spinner" style="display: none;"></div>
+                    </button>
+                </div>
+                
+                <div class="device-list" id="device-list">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📱</div>
+                        <p>デバイスを読み込み中...</p>
+                    </div>
+                </div>
+                
+                <div class="button-group">
+                    <button class="button button-success" onclick="saveSelectedDevice()" id="save-btn" disabled>
+                        設定を保存
+                    </button>
+                </div>
             </div>
-            <div class="status-item">
-                <span>MACアドレス:</span>
-                <span class="status-value" id="selected-device-mac">-</span>
+            
+            <!-- 現在の設定 -->
+            <div class="card">
+                <h2 class="card-title">現在の設定</h2>
+                <div class="status-display">
+                    <div class="status-row">
+                        <span class="status-label">選択デバイス</span>
+                        <span class="status-value" id="selected-device-name">未選択</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">MACアドレス</span>
+                        <span class="status-value" id="selected-device-mac">-</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">接続状態</span>
+                        <span class="status-value" id="connection-status">-</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">ワーカー状態</span>
+                        <span class="status-value" id="worker-status">-</span>
+                    </div>
+                </div>
+                
+                <div class="button-group">
+                    <button class="button button-primary" onclick="startRecording()" id="start-btn" disabled>
+                        録音開始
+                    </button>
+                    <button class="button button-danger" onclick="stopRecording()" id="stop-btn" disabled>
+                        録音停止
+                    </button>
+                </div>
             </div>
-            <div class="status-item">
-                <span>接続状態:</span>
-                <span class="status-value" id="connection-status">-</span>
+            
+            <!-- 録音ファイル -->
+            <div class="card">
+                <h2 class="card-title">録音ファイル</h2>
+                <div class="file-list" id="file-list">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📁</div>
+                        <p>ファイルを取得中...</p>
+                    </div>
+                </div>
             </div>
-        </div>
-        
-        <div class="recording-info" id="recording-info" style="display: none;">
-            <div>録音中...</div>
-            <div id="timer">00:00:00</div>
-            <div id="filename" style="font-size: 14px; color: #86868b;"></div>
-        </div>
-        
-        <div class="button-container">
-            <button class="start-btn" onclick="startRecording()" id="start-btn" disabled>録音開始</button>
-            <button class="stop-btn" onclick="stopRecording()" id="stop-btn" disabled>録音停止</button>
-        </div>
-        
-        <div id="message"></div>
-        
-        <div class="files-section">
-            <h3>録音ファイル</h3>
-            <div class="file-list" id="file-list">
-                <div style="text-align: center; color: #86868b;">ファイルを取得中...</div>
-            </div>
-        </div>
-        
-        <div style="margin-top: 20px; text-align: center;">
-            <button onclick="debugBluetooth()" style="background-color: #666; color: white; padding: 10px; border: none; border-radius: 8px; font-size: 14px;">
-                デバッグ情報
-            </button>
-        </div>
+        </main>
     </div>
     
     <script>
@@ -304,38 +651,31 @@
         let selectedDevice = null;
         let devicesData = [];
         
-        function showMessage(text, type) {
-            const message = document.getElementById('message');
-            message.textContent = text;
-            message.className = type;
-            message.style.display = 'block';
+        function showMessage(text, type = 'info') {
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = text;
+            document.body.appendChild(alert);
+            
             setTimeout(() => {
-                message.style.display = 'none';
-            }, 5000);
+                alert.style.animation = 'slideDown 0.3s ease-out reverse';
+                setTimeout(() => alert.remove(), 300);
+            }, 4000);
         }
         
         async function refreshDevices() {
-            console.log('refreshDevices() called');
             const refreshText = document.getElementById('refresh-text');
-            const refreshLoader = document.getElementById('refresh-loader');
+            const refreshSpinner = document.getElementById('refresh-spinner');
+            const refreshBtn = document.getElementById('refresh-btn');
             
-            if (!refreshText || !refreshLoader) {
-                console.error('UI elements not found');
-                return;
-            }
-            
+            refreshBtn.disabled = true;
             refreshText.style.display = 'none';
-            refreshLoader.style.display = 'inline-block';
+            refreshSpinner.style.display = 'block';
             
             try {
-                console.log('Fetching /get_devices...');
                 const response = await fetch('/get_devices');
-                console.log('Response status:', response.status);
                 const data = await response.json();
                 
-                console.log('Devices data:', data);
-                
-                // デバイスデータを保存
                 devicesData = data.devices || [];
                 
                 const deviceList = document.getElementById('device-list');
@@ -351,34 +691,18 @@
                         deviceDiv.className = 'device-item' + (isSelected ? ' selected' : '');
                         deviceDiv.setAttribute('data-index', index);
                         
-                        // 名前と状態
-                        const nameDiv = document.createElement('div');
-                        nameDiv.className = 'device-name';
+                        deviceDiv.innerHTML = `
+                            <div class="device-name">${device.name}</div>
+                            <div class="device-info">
+                                <span>${device.mac}</span>
+                                <span>${device.adapter_name}</span>
+                                <span class="device-status ${device.connected ? 'connected' : 'paired'}">
+                                    <span class="status-dot"></span>
+                                    ${device.connected ? '接続中' : 'ペアリング済み'}
+                                </span>
+                            </div>
+                        `;
                         
-                        const nameText = document.createTextNode(device.name);
-                        nameDiv.appendChild(nameText);
-                        
-                        const statusSpan = document.createElement('span');
-                        statusSpan.className = 'device-status ' + (device.connected ? 'connected' : 'paired');
-                        statusSpan.textContent = device.connected ? '接続中' : 'ペアリング済み';
-                        nameDiv.appendChild(document.createTextNode(' '));
-                        nameDiv.appendChild(statusSpan);
-                        
-                        // MACアドレス
-                        const macDiv = document.createElement('div');
-                        macDiv.className = 'device-mac';
-                        macDiv.textContent = device.mac;
-                        
-                        // アダプタ
-                        const adapterDiv = document.createElement('div');
-                        adapterDiv.className = 'device-adapter';
-                        adapterDiv.textContent = 'アダプタ: ' + device.adapter_name;
-                        
-                        deviceDiv.appendChild(nameDiv);
-                        deviceDiv.appendChild(macDiv);
-                        deviceDiv.appendChild(adapterDiv);
-                        
-                        // クリックイベントを設定
                         deviceDiv.addEventListener('click', function() {
                             selectDevice(device.mac, device.name, device.adapter, this);
                         });
@@ -386,37 +710,35 @@
                         deviceList.appendChild(deviceDiv);
                     });
                 } else {
-                    const emptyDiv = document.createElement('div');
-                    emptyDiv.style.textAlign = 'center';
-                    emptyDiv.style.color = '#86868b';
-                    emptyDiv.textContent = 'ペアリング済みデバイスがありません';
-                    deviceList.appendChild(emptyDiv);
+                    deviceList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📱</div>
+                            <p>ペアリング済みデバイスがありません</p>
+                        </div>
+                    `;
                 }
                 
-                // 現在の選択デバイスを読み込む
                 if (data.current_device) {
                     selectedDevice = data.current_device;
                     updateSelectedDeviceDisplay();
                 }
                 
             } catch (error) {
-                console.error('Error fetching devices:', error);
-                showMessage('デバイス一覧の取得に失敗しました: ' + error.message, 'error');
+                showMessage('デバイス一覧の取得に失敗しました', 'error');
             } finally {
+                refreshBtn.disabled = false;
                 refreshText.style.display = 'inline';
-                refreshLoader.style.display = 'none';
+                refreshSpinner.style.display = 'none';
             }
         }
         
         function selectDevice(mac, name, adapter, element) {
             selectedDevice = { mac, name, adapter };
             
-            // UIを更新
             document.querySelectorAll('.device-item').forEach(item => {
                 item.classList.remove('selected');
             });
             
-            // クリックされた要素を選択状態にする
             if (element) {
                 element.classList.add('selected');
             }
@@ -432,7 +754,6 @@
                 document.getElementById('connection-status').textContent = '確認中...';
                 document.getElementById('start-btn').disabled = false;
                 
-                // 接続状態を確認
                 checkConnection();
             } else {
                 document.getElementById('selected-device-name').textContent = '未選択';
@@ -481,10 +802,10 @@
                 const statusEl = document.getElementById('connection-status');
                 if (data.connected) {
                     statusEl.textContent = '接続済み';
-                    statusEl.className = 'status-value connected';
+                    statusEl.className = 'status-value success';
                 } else {
                     statusEl.textContent = '未接続';
-                    statusEl.className = 'status-value disconnected';
+                    statusEl.className = 'status-value danger';
                 }
             } catch (error) {
                 console.error('接続確認エラー:', error);
@@ -516,8 +837,7 @@
                 if (data.success) {
                     document.getElementById('start-btn').disabled = true;
                     document.getElementById('stop-btn').disabled = false;
-                    document.getElementById('recording-info').style.display = 'block';
-                    document.getElementById('filename').textContent = data.filename;
+                    document.getElementById('recording-indicator').style.display = 'block';
                     
                     startTime = Date.now();
                     timerInterval = setInterval(updateTimer, 1000);
@@ -532,7 +852,6 @@
         }
         
         async function stopRecording() {
-            // 連打防止
             const stopBtn = document.getElementById('stop-btn');
             if (stopBtn.disabled) return;
             stopBtn.disabled = true;
@@ -543,7 +862,7 @@
                 
                 if (data.success) {
                     document.getElementById('start-btn').disabled = false;
-                    document.getElementById('recording-info').style.display = 'none';
+                    document.getElementById('recording-indicator').style.display = 'none';
                     
                     if (timerInterval) {
                         clearInterval(timerInterval);
@@ -554,23 +873,11 @@
                     loadFiles();
                 } else {
                     showMessage(data.message || '録音停止に失敗しました', 'error');
-                    stopBtn.disabled = false;  // エラー時は再有効化
+                    stopBtn.disabled = false;
                 }
             } catch (error) {
-                console.error('Stop recording error:', error);
                 showMessage('録音停止中にエラーが発生しました', 'error');
-                stopBtn.disabled = false;  // エラー時は再有効化
-                
-                // タイマーを強制停止
-                if (timerInterval) {
-                    clearInterval(timerInterval);
-                    timerInterval = null;
-                }
-                
-                // UIをリセット
-                document.getElementById('start-btn').disabled = false;
-                document.getElementById('stop-btn').disabled = true;
-                document.getElementById('recording-info').style.display = 'none';
+                stopBtn.disabled = false;
             }
         }
         
@@ -590,7 +897,6 @@
         }
         
         async function loadFiles() {
-            console.log('Loading files...');
             try {
                 const response = await fetch('/get_files');
                 const data = await response.json();
@@ -601,17 +907,22 @@
                         <div class="file-item">
                             <div class="file-name">${file}</div>
                             <div class="file-actions">
-                                <button onclick="downloadFile('${file}')" style="background-color: #007aff; color: white;">
+                                <button class="button button-primary" onclick="downloadFile('${file}')">
                                     ダウンロード
                                 </button>
-                                <button onclick="deleteFile('${file}')" style="background-color: #ff3b30; color: white;">
+                                <button class="button button-danger" onclick="deleteFile('${file}')">
                                     削除
                                 </button>
                             </div>
                         </div>
                     `).join('');
                 } else {
-                    fileList.innerHTML = '<div style="text-align: center; color: #86868b;">録音ファイルがありません</div>';
+                    fileList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📁</div>
+                            <p>録音ファイルがありません</p>
+                        </div>
+                    `;
                 }
             } catch (error) {
                 console.error('ファイル一覧の取得に失敗しました:', error);
@@ -622,7 +933,6 @@
             try {
                 window.location.href = `/download/${filename}`;
             } catch (error) {
-                console.error('ダウンロードエラー:', error);
                 showMessage('ダウンロードに失敗しました', 'error');
             }
         }
@@ -640,29 +950,40 @@
                 
                 if (data.success) {
                     showMessage('ファイルを削除しました', 'success');
-                    loadFiles(); // ファイル一覧を更新
+                    loadFiles();
                 } else {
                     showMessage(data.message || '削除に失敗しました', 'error');
                 }
             } catch (error) {
-                console.error('削除エラー:', error);
                 showMessage('削除中にエラーが発生しました', 'error');
             }
         }
-        
-        // グローバル関数として登録
-        window.downloadFile = downloadFile;
-        window.deleteFile = deleteFile;
         
         async function getStatus() {
             try {
                 const response = await fetch('/get_status');
                 const data = await response.json();
                 
+                // ワーカー状態を更新
+                const workerStatus = document.getElementById('worker-status');
+                if (data.status === 'recording') {
+                    workerStatus.textContent = '録音中';
+                    workerStatus.className = 'status-value success';
+                } else if (data.status === 'idle') {
+                    workerStatus.textContent = 'アイドル';
+                    workerStatus.className = 'status-value';
+                } else if (data.status === 'offline') {
+                    workerStatus.textContent = 'オフライン';
+                    workerStatus.className = 'status-value danger';
+                } else {
+                    workerStatus.textContent = data.status || '不明';
+                    workerStatus.className = 'status-value';
+                }
+                
                 if (data.recording) {
                     document.getElementById('start-btn').disabled = true;
                     document.getElementById('stop-btn').disabled = false;
-                    document.getElementById('recording-info').style.display = 'block';
+                    document.getElementById('recording-indicator').style.display = 'block';
                     document.getElementById('filename').textContent = data.filename || '';
                     
                     if (data.start_time && !timerInterval) {
@@ -673,7 +994,7 @@
                 } else {
                     document.getElementById('start-btn').disabled = selectedDevice ? false : true;
                     document.getElementById('stop-btn').disabled = true;
-                    document.getElementById('recording-info').style.display = 'none';
+                    document.getElementById('recording-indicator').style.display = 'none';
                 }
             } catch (error) {
                 console.error('ステータス取得エラー:', error);
@@ -685,23 +1006,24 @@
                 const response = await fetch('/debug_bluetooth');
                 const data = await response.json();
                 console.log('Debug Info:', data);
-                alert('デバッグ情報をコンソールに出力しました。\n\n' + 
-                      'hciconfig結果:\n' + data.hciconfig.substring(0, 200) + '...\n\n' +
-                      'デバイス一覧:\n' + data.bluetoothctl_devices.substring(0, 200) + '...');
+                alert('デバッグ情報をコンソールに出力しました');
             } catch (error) {
                 alert('デバッグ情報の取得に失敗しました: ' + error);
             }
         }
         
+        // グローバル関数として登録
+        window.downloadFile = downloadFile;
+        window.deleteFile = deleteFile;
+        
         // 初期化
         window.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, initializing...');
             refreshDevices();
             loadFiles();
             getStatus();
             
             // 定期的に状態を更新
-            setInterval(getStatus, 5000);
+            setInterval(getStatus, 2000);
         });
     </script>
 </body>

@@ -5,9 +5,6 @@ iPhoneからアクセスできるWebインターフェース付き録音アプ�
 """
 
 from flask import Flask, render_template, jsonify, request, send_file
-import pyaudio
-import wave
-import datetime
 import os
 import subprocess
 import threading
@@ -17,6 +14,7 @@ import time
 import logging
 import json
 import socket
+import psutil
 
 # Flaskアプリの設定
 app = Flask(__name__)
@@ -25,24 +23,82 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# 録音設定（vorbis-tools対応）
-CHUNK = 2048
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 22050
-RECORD_SECONDS = 7200  # 2時間（デフォルト）
-
 # 設定ファイル
 CONFIG_FILE = "recorder_config.json"
+STATUS_FILE = "recorder_status.json"
+COMMAND_FILE = "recorder_command.json"
+WORKER_SCRIPT = "recorder_worker.py"
 
 # グローバル変数
-recording_thread = None
-stop_recording = False
-recording_active = False
-current_filename = None
-recording_start_time = None
 selected_device = None
 selected_adapter = None
+worker_process = None
+
+def send_command(command):
+    """ワーカープロセスにコマンドを送信"""
+    try:
+        with open(COMMAND_FILE, 'w') as f:
+            json.dump(command, f)
+        return True
+    except Exception as e:
+        logging.error(f"コマンド送信エラー: {e}")
+        return False
+
+def get_worker_status():
+    """ワーカープロセスのステータスを取得"""
+    try:
+        if not os.path.exists(STATUS_FILE):
+            return None
+            
+        with open(STATUS_FILE, 'r') as f:
+            status = json.load(f)
+            
+        # ステータスが古すぎる場合はワーカーが死んでいる可能性
+        if time.time() - status.get('updated_at', 0) > 10:
+            return None
+            
+        return status
+    except Exception as e:
+        logging.error(f"ステータス取得エラー: {e}")
+        return None
+
+def start_worker_process():
+    """ワーカープロセスを起動"""
+    global worker_process
+    
+    try:
+        # 既存のワーカーを確認
+        status = get_worker_status()
+        if status and status.get('pid'):
+            try:
+                # プロセスが生きているか確認
+                if psutil.pid_exists(status['pid']):
+                    logging.info(f"ワーカープロセスは既に起動中: PID {status['pid']}")
+                    return True
+            except:
+                pass
+        
+        # 新しいワーカーを起動
+        worker_process = subprocess.Popen(
+            [sys.executable, WORKER_SCRIPT],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True  # 親プロセスから独立
+        )
+        
+        logging.info(f"ワーカープロセスを起動: PID {worker_process.pid}")
+        
+        # ワーカーの起動を待つ
+        for i in range(30):
+            if get_worker_status():
+                return True
+            time.sleep(0.1)
+        
+        return False
+        
+    except Exception as e:
+        logging.error(f"ワーカー起動エラー: {e}")
+        return False
 
 def load_config():
     """設定ファイルを読み込む"""
@@ -256,154 +312,6 @@ def check_device_connection(device_info):
     except Exception as e:
         return False, f"Bluetoothチェック中にエラーが発生しました: {e}"
 
-def record_audio_worker(duration_seconds):
-    """録音処理を行うワーカー関数"""
-    global stop_recording, recording_active, current_filename
-    
-    # ファイル名を最初に設定
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    wav_temp_file = f"temp_{timestamp}.wav"
-    ogg_output_file = f"recording_{timestamp}.ogg"
-    current_filename = ogg_output_file
-    
-    # 変数の初期化
-    p = None
-    stream = None
-    stop_recording = False  # グローバル変数を初期化
-    
-    try:
-        # ALSAの警告を抑制
-        os.environ['PYTHONWARNINGS'] = 'ignore'
-        devnull = open(os.devnull, 'w')
-        old_stderr = os.dup(2)
-        os.dup2(devnull.fileno(), 2)
-        
-        # PyAudioの初期化
-        p = pyaudio.PyAudio()
-        
-        # 標準エラー出力を復元
-        os.dup2(old_stderr, 2)
-        devnull.close()
-        
-        # ストリームを開く
-        stream = p.open(format=FORMAT,
-                       channels=CHANNELS,
-                       rate=RATE,
-                       input=True,
-                       frames_per_buffer=CHUNK)
-        
-        frames = []
-        recording_active = True
-        
-        total_chunks = int(RATE / CHUNK * duration_seconds)
-        
-        # 録音ループ
-        for i in range(total_chunks):
-            if stop_recording:
-                break
-            
-            try:
-                # ストリームが有効か確認
-                if stream and stream.is_active():
-                    data = stream.read(CHUNK, exception_on_overflow=False)
-                    frames.append(data)
-                else:
-                    logging.warning("ストリームが無効です")
-                    break
-            except Exception as e:
-                logging.error(f"録音中のエラー: {e}")
-                break
-        
-        logging.info(f"録音ループ終了: {len(frames)}フレーム")
-        
-        # 録音終了前にフラグを更新
-        recording_active = False
-        stop_recording = False
-                
-        # ストリームを適切に閉じる
-        if stream:
-            try:
-                if stream.is_active():
-                    stream.stop_stream()
-                stream.close()
-            except Exception as e:
-                logging.error(f"ストリームクローズエラー: {e}")
-        
-        # PyAudioを先に終了
-        if p:
-            try:
-                p.terminate()
-                p = None
-            except Exception as e:
-                logging.error(f"PyAudio終了エラー: {e}")
-        
-        if len(frames) == 0:
-            logging.warning("録音データがありません")
-            return
-        
-        # WAVファイル保存
-        try:
-            wf = wave.open(wav_temp_file, 'wb')
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(p.get_sample_size(FORMAT))
-            wf.setframerate(RATE)
-            wf.writeframes(b''.join(frames))
-            wf.close()
-            
-            logging.info(f"WAVファイル保存完了: {wav_temp_file}")
-        except Exception as e:
-            logging.error(f"WAVファイル保存エラー: {e}")
-            return
-        
-        # OGG変換
-        try:
-            # oggencが存在するか確認
-            check_oggenc = subprocess.run(['which', 'oggenc'], capture_output=True, text=True)
-            if check_oggenc.returncode != 0:
-                logging.error("oggencがインストールされていません。vorbis-toolsをインストールしてください。")
-                return
-            
-            result = subprocess.run([
-                'oggenc', 
-                '-q', '4',
-                '-o', ogg_output_file,
-                wav_temp_file
-            ], capture_output=True, text=True, timeout=1800)
-            
-            if result.returncode == 0:
-                if os.path.exists(wav_temp_file):
-                    os.remove(wav_temp_file)
-                logging.info(f"録音完了: {ogg_output_file}")
-            else:
-                logging.error(f"OGG変換失敗: {result.stderr}")
-        
-        except subprocess.TimeoutExpired:
-            logging.error("OGG変換がタイムアウトしました")
-        except Exception as e:
-            logging.error(f"OGG変換エラー: {e}")
-        
-    except Exception as e:
-        logging.error(f"録音エラー: {e}")
-        import traceback
-        logging.error(traceback.format_exc())
-        recording_active = False
-    
-    finally:
-        # クリーンアップ
-        recording_active = False
-        stop_recording = False
-        current_filename = None
-        
-        # PyAudioの終了
-        if p:
-            try:
-                p.terminate()
-            except Exception as e:
-                logging.error(f"PyAudio終了エラー: {e}")
-        
-        # 少し待つ
-        time.sleep(0.5)
-
 @app.route('/')
 def index():
     """メインページ"""
@@ -487,9 +395,21 @@ def check_connection():
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
     """録音開始API"""
-    global recording_thread, recording_start_time, selected_device, current_filename
+    global selected_device
     
-    if recording_active:
+    # ワーカーのステータスを確認
+    status = get_worker_status()
+    if not status:
+        # ワーカーが起動していない場合は起動
+        if not start_worker_process():
+            return jsonify({
+                'success': False,
+                'message': 'ワーカープロセスの起動に失敗しました'
+            })
+    
+    # 既に録音中か確認
+    status = get_worker_status()
+    if status and status.get('recording'):
         return jsonify({
             'success': False,
             'message': '既に録音中です'
@@ -515,59 +435,44 @@ def start_recording():
     
     # 録音時間を取得（デフォルト120分）
     duration_minutes = data.get('duration', 120)
-    duration_seconds = duration_minutes * 60
     
-    recording_start_time = time.time()
+    # ワーカーにコマンドを送信
+    command = {
+        'action': 'start',
+        'duration': duration_minutes,
+        'device': device_info
+    }
     
-    # ファイル名を事前に生成
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_filename = f"recording_{timestamp}.ogg"
+    if not send_command(command):
+        return jsonify({
+            'success': False,
+            'message': 'コマンドの送信に失敗しました'
+        })
     
-    # 録音スレッドを開始
-    recording_thread = threading.Thread(
-        target=record_audio_worker,
-        args=(duration_seconds,)
-    )
-    recording_thread.daemon = True
-    recording_thread.start()
-    
-    # 少し待ってcurrent_filenameが設定されるのを待つ
-    time.sleep(0.1)
-    
-    logging.info(f"録音開始: {duration_minutes}分間, デバイス: {device_info['name']}, ファイル名: {current_filename or temp_filename}")
+    logging.info(f"録音開始コマンド送信: {duration_minutes}分間, デバイス: {device_info['name']}")
     
     return jsonify({
         'success': True,
-        'message': f'{duration_minutes}分間の録音を開始しました',
-        'filename': current_filename or temp_filename
+        'message': f'{duration_minutes}分間の録音を開始しました'
     })
 
 @app.route('/stop_recording', methods=['POST'])
 def stop_recording():
     """録音停止API"""
-    global stop_recording, recording_active, recording_thread
-    
-    if not recording_active:
+    status = get_worker_status()
+    if not status or not status.get('recording'):
         return jsonify({
             'success': False,
             'message': '録音中ではありません'
         })
     
     try:
-        # 停止フラグを設定
-        stop_recording = True
-        logging.info("録音停止要求を受信")
-        
-        # 録音スレッドの終了を待つ（最大10秒）
-        if recording_thread and recording_thread.is_alive():
-            recording_thread.join(timeout=10)
-            if recording_thread.is_alive():
-                logging.warning("録音スレッドが時間内に終了しませんでした")
-        
-        # フラグをリセット
-        stop_recording = False
-        recording_active = False
-        recording_thread = None
+        # 停止コマンドを送信
+        if not send_command({'action': 'stop'}):
+            return jsonify({
+                'success': False,
+                'message': 'コマンドの送信に失敗しました'
+            })
         
         logging.info("録音停止完了")
         return jsonify({
@@ -585,11 +490,15 @@ def stop_recording():
 @app.route('/get_status')
 def get_status():
     """録音状態取得API"""
-    return jsonify({
-        'recording': recording_active,
-        'filename': current_filename if recording_active else None,
-        'start_time': recording_start_time
-    })
+    status = get_worker_status()
+    
+    if status:
+        return jsonify(status)
+    else:
+        return jsonify({
+            'recording': False,
+            'status': 'offline'
+        })
 
 @app.route('/get_files')
 def get_files():
@@ -693,6 +602,19 @@ def debug_bluetooth():
     
     return jsonify(debug_info)
 
+def cleanup():
+    """クリーンアップ処理"""
+    global worker_process
+    
+    # ワーカープロセスに終了コマンドを送信
+    send_command({'action': 'shutdown'})
+    
+    if worker_process:
+        try:
+            worker_process.terminate()
+        except:
+            pass
+
 if __name__ == '__main__':
     # 設定を読み込む
     load_config()
@@ -719,6 +641,12 @@ if __name__ == '__main__':
     print("=" * 50)
     print("Raspberry Pi Web録音コントローラー")
     print("=" * 50)
+    
+    # ワーカープロセスを起動
+    if not start_worker_process():
+        print("エラー: ワーカープロセスの起動に失敗しました")
+        sys.exit(1)
+    
     if selected_device:
         print(f"保存済みデバイス: {selected_device.get('name')}")
         print(f"MACアドレス: {selected_device.get('mac')}")
@@ -730,15 +658,15 @@ if __name__ == '__main__':
     print("Ctrl+C で終了")
     print("=" * 50)
     
-    # エラーが発生してもサーバーを継続実行
-    while True:
-        try:
-            # Flaskアプリを起動（同じネットワーク内からアクセス可能）
-            app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-        except KeyboardInterrupt:
-            print("\n\nサーバーを停止します...")
-            break
-        except Exception as e:
-            print(f"\nエラーが発生しました: {e}")
-            print("5秒後に再起動します...")
-            time.sleep(5)
+    try:
+        # Flaskアプリを起動
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    except KeyboardInterrupt:
+        print("サーバーを停止します...")
+    except Exception as e:
+        print(f"サーバーエラー: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        cleanup()
+        print("サーバーを終了しました")
