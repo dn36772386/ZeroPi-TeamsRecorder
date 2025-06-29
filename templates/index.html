@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Raspberry Pi 録音コントローラー</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 30px;
+            color: #1d1d1f;
+        }
+        .status-card {
+            background-color: #f5f5f7;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .status-value {
+            font-weight: 600;
+        }
+        .status-value.connected {
+            color: #34c759;
+        }
+        .status-value.disconnected {
+            color: #ff3b30;
+        }
+        .device-selector {
+            background-color: #f5f5f7;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .device-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        .device-item {
+            padding: 15px;
+            margin: 8px 0;
+            background-color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        .device-item:hover {
+            background-color: #e5e5e7;
+        }
+        .device-item.selected {
+            border-color: #007aff;
+            background-color: #e8f2ff;
+        }
+        .device-name {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+        .device-mac {
+            font-size: 14px;
+            color: #86868b;
+        }
+        .device-adapter {
+            font-size: 12px;
+            color: #86868b;
+            margin-top: 3px;
+        }
+        .device-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .device-status.connected {
+            background-color: #d1f2d1;
+            color: #00691f;
+        }
+        .device-status.paired {
+            background-color: #d1e7ff;
+            color: #0051d5;
+        }
+        .button-container {
+            display: flex;
+            gap: 15px;
+            margin: 30px 0;
+        }
+        button {
+            flex: 1;
+            padding: 18px;
+            font-size: 18px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .refresh-btn {
+            background-color: #5856d6;
+            color: white;
+        }
+        .refresh-btn:hover:not(:disabled) {
+            background-color: #3e3bb3;
+        }
+        .save-btn {
+            background-color: #34c759;
+            color: white;
+        }
+        .save-btn:hover:not(:disabled) {
+            background-color: #248a3d;
+        }
+        .start-btn {
+            background-color: #007aff;
+            color: white;
+        }
+        .start-btn:hover:not(:disabled) {
+            background-color: #0051d5;
+        }
+        .stop-btn {
+            background-color: #ff3b30;
+            color: white;
+        }
+        .stop-btn:hover:not(:disabled) {
+            background-color: #d70015;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #message {
+            text-align: center;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 12px;
+            font-weight: 500;
+            display: none;
+        }
+        .success {
+            background-color: #d1f2d1;
+            color: #00691f;
+        }
+        .error {
+            background-color: #ffd4d1;
+            color: #c41e3a;
+        }
+        .info {
+            background-color: #d1e7ff;
+            color: #0051d5;
+        }
+        .recording-info {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 18px;
+        }
+        #timer {
+            font-size: 36px;
+            font-weight: 700;
+            color: #007aff;
+            margin: 10px 0;
+        }
+        .files-section {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #e5e5e7;
+        }
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e5e5e7;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            margin: 4px 0;
+            background-color: #f5f5f7;
+            border-radius: 6px;
+        }
+        .file-name {
+            font-size: 14px;
+            word-break: break-all;
+            flex: 1;
+        }
+        .file-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: 10px;
+        }
+        .file-actions button {
+            padding: 4px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+        }
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007aff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ 録音コントローラー</h1>
+        
+        <div class="device-selector">
+            <h3>録音デバイス選択</h3>
+            <div class="button-container">
+                <button class="refresh-btn" onclick="refreshDevices()">
+                    <span id="refresh-text">デバイス更新</span>
+                    <span id="refresh-loader" style="display: none;" class="loader"></span>
+                </button>
+                <button class="save-btn" onclick="saveSelectedDevice()" id="save-btn" disabled>
+                    設定を保存
+                </button>
+            </div>
+            <div class="device-list" id="device-list">
+                <div style="text-align: center; color: #86868b;">デバイスを読み込み中...</div>
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <h3>現在の設定</h3>
+            <div class="status-item">
+                <span>選択デバイス:</span>
+                <span class="status-value" id="selected-device-name">未選択</span>
+            </div>
+            <div class="status-item">
+                <span>MACアドレス:</span>
+                <span class="status-value" id="selected-device-mac">-</span>
+            </div>
+            <div class="status-item">
+                <span>接続状態:</span>
+                <span class="status-value" id="connection-status">-</span>
+            </div>
+        </div>
+        
+        <div class="recording-info" id="recording-info" style="display: none;">
+            <div>録音中...</div>
+            <div id="timer">00:00:00</div>
+            <div id="filename" style="font-size: 14px; color: #86868b;"></div>
+        </div>
+        
+        <div class="button-container">
+            <button class="start-btn" onclick="startRecording()" id="start-btn" disabled>録音開始</button>
+            <button class="stop-btn" onclick="stopRecording()" id="stop-btn" disabled>録音停止</button>
+        </div>
+        
+        <div id="message"></div>
+        
+        <div class="files-section">
+            <h3>録音ファイル</h3>
+            <div class="file-list" id="file-list">
+                <div style="text-align: center; color: #86868b;">ファイルを取得中...</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px; text-align: center;">
+            <button onclick="debugBluetooth()" style="background-color: #666; color: white; padding: 10px; border: none; border-radius: 8px; font-size: 14px;">
+                デバッグ情報
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        let timerInterval = null;
+        let startTime = null;
+        let selectedDevice = null;
+        let devicesData = [];
+        
+        function showMessage(text, type) {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = type;
+            message.style.display = 'block';
+            setTimeout(() => {
+                message.style.display = 'none';
+            }, 5000);
+        }
+        
+        async function refreshDevices() {
+            console.log('refreshDevices() called');
+            const refreshText = document.getElementById('refresh-text');
+            const refreshLoader = document.getElementById('refresh-loader');
+            
+            if (!refreshText || !refreshLoader) {
+                console.error('UI elements not found');
+                return;
+            }
+            
+            refreshText.style.display = 'none';
+            refreshLoader.style.display = 'inline-block';
+            
+            try {
+                console.log('Fetching /get_devices...');
+                const response = await fetch('/get_devices');
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                
+                console.log('Devices data:', data);
+                
+                // デバイスデータを保存
+                devicesData = data.devices || [];
+                
+                const deviceList = document.getElementById('device-list');
+                deviceList.innerHTML = '';
+                
+                if (devicesData.length > 0) {
+                    devicesData.forEach((device, index) => {
+                        const isSelected = selectedDevice && 
+                                         selectedDevice.mac === device.mac && 
+                                         selectedDevice.adapter === device.adapter;
+                        
+                        const deviceDiv = document.createElement('div');
+                        deviceDiv.className = 'device-item' + (isSelected ? ' selected' : '');
+                        deviceDiv.setAttribute('data-index', index);
+                        
+                        // 名前と状態
+                        const nameDiv = document.createElement('div');
+                        nameDiv.className = 'device-name';
+                        
+                        const nameText = document.createTextNode(device.name);
+                        nameDiv.appendChild(nameText);
+                        
+                        const statusSpan = document.createElement('span');
+                        statusSpan.className = 'device-status ' + (device.connected ? 'connected' : 'paired');
+                        statusSpan.textContent = device.connected ? '接続中' : 'ペアリング済み';
+                        nameDiv.appendChild(document.createTextNode(' '));
+                        nameDiv.appendChild(statusSpan);
+                        
+                        // MACアドレス
+                        const macDiv = document.createElement('div');
+                        macDiv.className = 'device-mac';
+                        macDiv.textContent = device.mac;
+                        
+                        // アダプタ
+                        const adapterDiv = document.createElement('div');
+                        adapterDiv.className = 'device-adapter';
+                        adapterDiv.textContent = 'アダプタ: ' + device.adapter_name;
+                        
+                        deviceDiv.appendChild(nameDiv);
+                        deviceDiv.appendChild(macDiv);
+                        deviceDiv.appendChild(adapterDiv);
+                        
+                        // クリックイベントを設定
+                        deviceDiv.addEventListener('click', function() {
+                            selectDevice(device.mac, device.name, device.adapter, this);
+                        });
+                        
+                        deviceList.appendChild(deviceDiv);
+                    });
+                } else {
+                    const emptyDiv = document.createElement('div');
+                    emptyDiv.style.textAlign = 'center';
+                    emptyDiv.style.color = '#86868b';
+                    emptyDiv.textContent = 'ペアリング済みデバイスがありません';
+                    deviceList.appendChild(emptyDiv);
+                }
+                
+                // 現在の選択デバイスを読み込む
+                if (data.current_device) {
+                    selectedDevice = data.current_device;
+                    updateSelectedDeviceDisplay();
+                }
+                
+            } catch (error) {
+                console.error('Error fetching devices:', error);
+                showMessage('デバイス一覧の取得に失敗しました: ' + error.message, 'error');
+            } finally {
+                refreshText.style.display = 'inline';
+                refreshLoader.style.display = 'none';
+            }
+        }
+        
+        function selectDevice(mac, name, adapter, element) {
+            selectedDevice = { mac, name, adapter };
+            
+            // UIを更新
+            document.querySelectorAll('.device-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // クリックされた要素を選択状態にする
+            if (element) {
+                element.classList.add('selected');
+            }
+            
+            updateSelectedDeviceDisplay();
+            document.getElementById('save-btn').disabled = false;
+        }
+        
+        function updateSelectedDeviceDisplay() {
+            if (selectedDevice) {
+                document.getElementById('selected-device-name').textContent = selectedDevice.name;
+                document.getElementById('selected-device-mac').textContent = selectedDevice.mac;
+                document.getElementById('connection-status').textContent = '確認中...';
+                document.getElementById('start-btn').disabled = false;
+                
+                // 接続状態を確認
+                checkConnection();
+            } else {
+                document.getElementById('selected-device-name').textContent = '未選択';
+                document.getElementById('selected-device-mac').textContent = '-';
+                document.getElementById('connection-status').textContent = '-';
+                document.getElementById('start-btn').disabled = true;
+            }
+        }
+        
+        async function saveSelectedDevice() {
+            if (!selectedDevice) {
+                showMessage('デバイスを選択してください', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/save_device', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(selectedDevice)
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('設定を保存しました', 'success');
+                    document.getElementById('save-btn').disabled = true;
+                } else {
+                    showMessage(data.message || '保存に失敗しました', 'error');
+                }
+            } catch (error) {
+                showMessage('設定の保存中にエラーが発生しました', 'error');
+            }
+        }
+        
+        async function checkConnection() {
+            if (!selectedDevice) return;
+            
+            try {
+                const response = await fetch('/check_connection', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(selectedDevice)
+                });
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('connection-status');
+                if (data.connected) {
+                    statusEl.textContent = '接続済み';
+                    statusEl.className = 'status-value connected';
+                } else {
+                    statusEl.textContent = '未接続';
+                    statusEl.className = 'status-value disconnected';
+                }
+            } catch (error) {
+                console.error('接続確認エラー:', error);
+            }
+        }
+        
+        async function startRecording() {
+            if (!selectedDevice) {
+                showMessage('録音デバイスを選択してください', 'error');
+                return;
+            }
+            
+            const duration = prompt('録音時間を分で入力してください（空欄で2時間）:', '120');
+            if (duration === null) return;
+            
+            const minutes = duration || 120;
+            
+            try {
+                const response = await fetch('/start_recording', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        duration: parseInt(minutes),
+                        device: selectedDevice
+                    })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('start-btn').disabled = true;
+                    document.getElementById('stop-btn').disabled = false;
+                    document.getElementById('recording-info').style.display = 'block';
+                    document.getElementById('filename').textContent = data.filename;
+                    
+                    startTime = Date.now();
+                    timerInterval = setInterval(updateTimer, 1000);
+                    
+                    showMessage('録音を開始しました', 'success');
+                } else {
+                    showMessage(data.message || '録音開始に失敗しました', 'error');
+                }
+            } catch (error) {
+                showMessage('録音開始中にエラーが発生しました', 'error');
+            }
+        }
+        
+        async function stopRecording() {
+            // 連打防止
+            const stopBtn = document.getElementById('stop-btn');
+            if (stopBtn.disabled) return;
+            stopBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/stop_recording', {method: 'POST'});
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('recording-info').style.display = 'none';
+                    
+                    if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                    }
+                    
+                    showMessage('録音を停止しました', 'success');
+                    loadFiles();
+                } else {
+                    showMessage(data.message || '録音停止に失敗しました', 'error');
+                    stopBtn.disabled = false;  // エラー時は再有効化
+                }
+            } catch (error) {
+                console.error('Stop recording error:', error);
+                showMessage('録音停止中にエラーが発生しました', 'error');
+                stopBtn.disabled = false;  // エラー時は再有効化
+                
+                // タイマーを強制停止
+                if (timerInterval) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }
+                
+                // UIをリセット
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('recording-info').style.display = 'none';
+            }
+        }
+        
+        function updateTimer() {
+            if (!startTime) return;
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            const seconds = elapsed % 60;
+            
+            const timer = document.getElementById('timer');
+            timer.textContent = 
+                String(hours).padStart(2, '0') + ':' +
+                String(minutes).padStart(2, '0') + ':' +
+                String(seconds).padStart(2, '0');
+        }
+        
+        async function loadFiles() {
+            console.log('Loading files...');
+            try {
+                const response = await fetch('/get_files');
+                const data = await response.json();
+                
+                const fileList = document.getElementById('file-list');
+                if (data.files && data.files.length > 0) {
+                    fileList.innerHTML = data.files.map(file => `
+                        <div class="file-item">
+                            <div class="file-name">${file}</div>
+                            <div class="file-actions">
+                                <button onclick="downloadFile('${file}')" style="background-color: #007aff; color: white;">
+                                    ダウンロード
+                                </button>
+                                <button onclick="deleteFile('${file}')" style="background-color: #ff3b30; color: white;">
+                                    削除
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    fileList.innerHTML = '<div style="text-align: center; color: #86868b;">録音ファイルがありません</div>';
+                }
+            } catch (error) {
+                console.error('ファイル一覧の取得に失敗しました:', error);
+            }
+        }
+        
+        async function downloadFile(filename) {
+            try {
+                window.location.href = `/download/${filename}`;
+            } catch (error) {
+                console.error('ダウンロードエラー:', error);
+                showMessage('ダウンロードに失敗しました', 'error');
+            }
+        }
+        
+        async function deleteFile(filename) {
+            if (!confirm(`${filename} を削除しますか？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/delete/${filename}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('ファイルを削除しました', 'success');
+                    loadFiles(); // ファイル一覧を更新
+                } else {
+                    showMessage(data.message || '削除に失敗しました', 'error');
+                }
+            } catch (error) {
+                console.error('削除エラー:', error);
+                showMessage('削除中にエラーが発生しました', 'error');
+            }
+        }
+        
+        // グローバル関数として登録
+        window.downloadFile = downloadFile;
+        window.deleteFile = deleteFile;
+        
+        async function getStatus() {
+            try {
+                const response = await fetch('/get_status');
+                const data = await response.json();
+                
+                if (data.recording) {
+                    document.getElementById('start-btn').disabled = true;
+                    document.getElementById('stop-btn').disabled = false;
+                    document.getElementById('recording-info').style.display = 'block';
+                    document.getElementById('filename').textContent = data.filename || '';
+                    
+                    if (data.start_time && !timerInterval) {
+                        startTime = data.start_time * 1000;
+                        timerInterval = setInterval(updateTimer, 1000);
+                        updateTimer();
+                    }
+                } else {
+                    document.getElementById('start-btn').disabled = selectedDevice ? false : true;
+                    document.getElementById('stop-btn').disabled = true;
+                    document.getElementById('recording-info').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('ステータス取得エラー:', error);
+            }
+        }
+        
+        async function debugBluetooth() {
+            try {
+                const response = await fetch('/debug_bluetooth');
+                const data = await response.json();
+                console.log('Debug Info:', data);
+                alert('デバッグ情報をコンソールに出力しました。\n\n' + 
+                      'hciconfig結果:\n' + data.hciconfig.substring(0, 200) + '...\n\n' +
+                      'デバイス一覧:\n' + data.bluetoothctl_devices.substring(0, 200) + '...');
+            } catch (error) {
+                alert('デバッグ情報の取得に失敗しました: ' + error);
+            }
+        }
+        
+        // 初期化
+        window.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing...');
+            refreshDevices();
+            loadFiles();
+            getStatus();
+            
+            // 定期的に状態を更新
+            setInterval(getStatus, 5000);
+        });
+    </script>
+</body>
+</html>
