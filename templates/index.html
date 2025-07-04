@@ -318,13 +318,24 @@
             width: 16px;
             height: 16px;
             margin-right: 8px;
-        }
-
-        .timer-display {
+        }        .timer-display {
             font-family: monospace;
             font-size: 16px;
             font-weight: 500;
             margin-bottom: 8px;
+        }
+        
+        .device-info {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            margin-top: 4px;
+        }
+        
+        .recording-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
         }
 
         .user-message {
@@ -374,11 +385,15 @@
                         <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-broadcast">
                             <path d="M8 12.25a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"></path><path d="M5.25 8a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Z"></path>
                         </svg>
-                        <span>録音中です...</span>
-                    </div>
+                        <span>録音中です...</span>                    </div>
                     <div class="recording-body">
                         <span id="timer">00:00:00</span>
                         <small id="filename"></small>
+                        <div class="device-info" id="device-info"></div>
+                        <div class="recording-stats">
+                            <small id="file-size"></small>
+                            <small id="recording-format"></small>
+                        </div>
                     </div>
                 </div>
 
@@ -397,12 +412,10 @@
                     <div class="Box-header">
                         <h3 class="Box-title">コントロール</h3>
                     </div>
-                    <div class="Box-body">
-                        <div id="status-indicator" class="status-indicator-idle">
+                    <div class="Box-body">                        <div id="status-indicator" class="status-indicator-idle">
                             <span class="status-icon"></span>
                             <span id="status-text">待機中</span>
                         </div>
-                        <div id="timer" class="timer-display">00:00:00</div>
                         
                         <div class="control-buttons">
                             <button id="start-button" class="btn btn-primary" onclick="startRecording()" disabled>
@@ -582,23 +595,39 @@
         async function updateStatus() {
             try {
                 const response = await fetch('/get_status');
-                const data = await response.json();
-
-                const statusIndicator = document.getElementById('status-indicator');
+                const data = await response.json();                const statusIndicator = document.getElementById('status-indicator');
                 const statusText = document.getElementById('status-text');
                 const ipAddressEl = document.getElementById('ip-address');
+                const recordingIndicator = document.getElementById('recording-indicator');
 
                 ipAddressEl.textContent = `IP: ${data.ip_address || '-.--.--.--'}`;
 
                 if (data.recording) {
                     statusIndicator.className = 'status-indicator-recording';
                     statusText.textContent = `録音中: ${data.filename || ''}`;
+                    recordingIndicator.style.display = 'block';
+                    
+                    // デバイス情報の表示
+                    if (data.device) {
+                        document.getElementById('device-info').textContent = 
+                            `デバイス: ${data.device.name} (${data.device.type})`;
+                    }
+                    
+                    // 録音情報の表示
+                    if (data.recording_info) {
+                        const sizeMB = (data.recording_info.file_size / 1024 / 1024).toFixed(1);
+                        document.getElementById('file-size').textContent = `サイズ: ${sizeMB} MB`;
+                        document.getElementById('recording-format').textContent = data.recording_info.format;
+                    }
+                    
+                    // タイマーの更新
                     if (!timerInterval) {
                         // サーバーの開始時間からタイマーを初期化
                         recordingStartTime = Date.now() - ((data.start_time ? (Date.now() / 1000 - data.start_time) : 0) * 1000);
                         timerInterval = setInterval(updateTimer, 1000);
                     }
                 } else {
+                    recordingIndicator.style.display = 'none';
                     statusIndicator.className = 'status-indicator-idle';
                     statusText.textContent = '待機中';
                     if (data.status === 'error') {

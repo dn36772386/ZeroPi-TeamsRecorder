@@ -56,6 +56,7 @@ status = {
     'status': 'idle', # idle, recording, error
     'start_time': None,
     'filename': None,
+    'device': None,
     'error_message': None
 }
 stop_recording_flag = threading.Event()
@@ -141,6 +142,7 @@ def find_bluetooth_source(device_mac):
 def record_audio_thread(device_mac, filename_base):
     """ffmpegを使用した録音スレッド"""
     global status
+    device_info = None
     
     final_ogg_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
     process = None
@@ -163,13 +165,13 @@ def record_audio_thread(device_mac, filename_base):
         ]
 
         worker_logger.info(f"録音開始: {' '.join(cmd)}")
-        
-        # ステータスを先に更新
+          # ステータスを先に更新
         update_status({
             'recording': True,
             'status': 'recording',
             'start_time': time.time(),
             'filename': os.path.basename(final_ogg_filename),
+            'device': device_info,
             'error_message': None
         })
 
@@ -178,11 +180,10 @@ def record_audio_thread(device_mac, filename_base):
             cmd,
             stdin=subprocess.PIPE,  # SIGINTを送るため
             stderr=subprocess.DEVNULL  # バッファ溢れ防止
-        )
-
-        # 録音監視ループ
+        )        # 録音監視ループ
         start_time = time.time()
         last_size = 0
+        last_status_update = time.time()
         
         while not stop_recording_flag.is_set():
             # プロセスの生存確認
@@ -195,13 +196,25 @@ def record_audio_thread(device_mac, filename_base):
                 current_size = os.path.getsize(final_ogg_filename)
                 if current_size > last_size:
                     last_size = current_size
-                    # 録音継続中
-                elif time.time() - start_time > 10:
+                    # 録音継続中                elif time.time() - start_time > 10:
                     # 10秒以上サイズが変わらない
                     worker_logger.warning("録音が停止している可能性")
             
-            # ステータス更新
-            update_status()
+            # ステータス更新（1秒ごと）
+            if time.time() - last_status_update >= 1:
+                current_time = time.time()
+                duration = int(current_time - start_time)
+                file_size = os.path.getsize(final_ogg_filename) if os.path.exists(final_ogg_filename) else 0
+                
+                update_status({
+                    'recording_info': {
+                        'duration': duration,
+                        'file_size': file_size,
+                        'format': 'OGG Vorbis 128kbps'
+                    }
+                })
+                last_status_update = current_time
+            
             time.sleep(0.5)
 
         # 適切な停止処理
@@ -233,13 +246,14 @@ def record_audio_thread(device_mac, filename_base):
         update_status({'status': 'error', 'error_message': str(e)})
         if process and process.poll() is None:
             process.kill()
-    finally:
-        # クリーンアップ
+    finally:        # クリーンアップ
         update_status({
             'recording': False,
             'status': 'idle',
             'start_time': None,
-            'filename': None
+            'filename': None,
+            'device': None,
+            'recording_info': None
         })
         stop_recording_flag.clear()
         worker_logger.info("録音処理が完了しました。")
@@ -270,7 +284,17 @@ def check_command():
                 update_status({'status': 'error', 'error_message': 'デバイスが指定されていません。'})
                 return
             
-            # デバイスのMACアドレスを取得
+            # デバイス情報を保存
+            device_info = {
+                'name': device.get('name', 'Unknown Device'),
+                'mac': device.get('mac') if isinstance(device, dict) else device,
+                'type': 'Bluetooth Audio Source',
+                'adapter': device.get('adapter', 'unknown')
+            }
+            
+            # record_audio_threadに渡すためにグローバル変数に保存
+            status['device'] = device_info
+            
             device_mac = device.get('mac') if isinstance(device, dict) else device
             
             filename_base = f"recording_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
