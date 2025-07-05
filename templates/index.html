@@ -301,12 +301,10 @@
             flex: 1;
             min-width: 0; /* テキストの省略表示を有効に */
         }
-        
-        .Box-row-content a {
+          .Box-row-content a {
             display: block;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            word-break: break-all;
+            line-height: 1.3;
         }
         
         .Box-row-content .text-bold {
@@ -323,24 +321,21 @@
             gap: 8px;
             flex-shrink: 0;
         }
-        
-        /* モバイルでのファイルリスト最適化 */
+          /* モバイルでのファイルリスト最適化 */
         @media (max-width: 640px) {
-            .Box-row {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
-                padding: 12px;
-            }
-            
             .Box-row-actions {
-                width: 100%;
-                justify-content: stretch;
+                gap: 4px;
             }
             
             .Box-row-actions .btn {
-                flex: 1;
-                justify-content: center;
+                padding: 4px 8px;
+            }
+              .Box-row-content a {
+                font-size: 13px;
+            }
+            
+            .Box-row {
+                padding: 10px 12px;
             }
         }
 
@@ -423,11 +418,16 @@
             background-color: var(--color-btn-danger-hover-bg);
             border-color: var(--color-btn-danger-hover-border);
         }
-        
-        /* モバイルでボタンテキストを非表示 */
-        @media (max-width: 480px) {
+          /* モバイルでボタンテキストを非表示 */
+        @media (max-width: 640px) {
             .btn-text {
                 display: none;
+            }
+            
+            .btn {
+                padding: 5px 12px;
+                font-size: 13px;
+                min-width: auto;
             }
             
             .btn-sm {
@@ -454,10 +454,26 @@
             flex-direction: column;
         }
         
+        /* デバイスリストボックスの高さ制限 */
+        .sidebar .Box {
+            display: flex;
+            flex-direction: column;
+        }
+        
         #device-list {
             overflow-y: auto;
             flex: 1;
-            min-height: 200px;
+            max-height: 400px;
+        }
+        
+        @media (min-width: 768px) {
+            .sidebar .Box {
+                max-height: calc(100vh - 250px);
+            }
+            
+            #device-list {
+                max-height: none;
+            }
         }
 
         .spinner {
@@ -713,23 +729,12 @@
             const indicator = document.getElementById('audio-indicator');
             const statusText = document.getElementById('audio-status-text');
             
-            if (data.recording && data.recording_info && data.recording_info.file_size) {
-                const currentSize = data.recording_info.file_size;
-                const sizeIncreased = currentSize > (window.lastFileSize || 0);
-                
-                if (sizeIncreased) {
-                    indicator.classList.add('active');
-                    statusText.textContent = '録音中';
-                } else {
-                    indicator.classList.remove('active');  
-                    statusText.textContent = '無音？';
-                }
-                
-                window.lastFileSize = currentSize;
+            if (data.recording) {
+                indicator.classList.add('active');
+                statusText.textContent = '録音中';
             } else {
                 indicator.classList.remove('active');
                 statusText.textContent = '待機中';
-                window.lastFileSize = 0;
             }
         }
 
@@ -930,8 +935,16 @@
             document.getElementById('timer').textContent = '00:00:00';
             document.getElementById('recording-timer').classList.remove('active');
             updateButtonStates();
-            updateAudioStatus({recording: false});
-            setTimeout(updateFileList, 1000); // ファイルリストの更新を少し遅らせる
+            updateAudioStatus({recording: false});            setTimeout(updateFileList, 1000); // ファイルリストの更新を少し遅らせる
+        }
+        
+        // ファイル名を見やすくフォーマット（オプション）
+        function formatFileName(filename) {
+            // recording_2025-07-05_07-56-35.ogg のような形式の場合
+            if (filename.startsWith('recording_')) {
+                return filename.replace('recording_', '').replace('.ogg', '');
+            }
+            return filename;
         }
 
         async function updateFileList() {
@@ -950,16 +963,14 @@
                                 <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16">
                                     <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586a.75.75 0 0 1 .53.22l2.914 2.914a.75.75 0 0 1 .22.53V14.25c0 .966-.784 1.75-1.75 1.75H3.75A1.75 1.75 0 0 1 2 14.25V1.75Z"></path>
                                 </svg>
-                            </div>
-                            <div class="Box-row-content">
-                                <a href="/download/${file}" style="text-decoration: none; color: inherit;" title="${file}">${file}</a>
-                            </div>
-                            <div class="Box-row-actions">
-                                <button class="btn btn-sm" onclick="downloadFile('${file}')">
+                            </div>                            <div class="Box-row-content">
+                                <a href="/download/${file}" style="text-decoration: none; color: inherit;" title="${file}">${formatFileName(file)}</a>
+                            </div><div class="Box-row-actions">
+                                <button class="btn btn-sm" onclick="downloadFile('${file}')" title="Download">
                                     <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"></path><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"></path></svg>
                                     <span class="btn-text">Download</span>
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteFile('${file}')">
+                                <button class="btn btn-sm btn-danger" onclick="deleteFile('${file}')" title="Delete">
                                     <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z"></path></svg>
                                     <span class="btn-text">Delete</span>
                                 </button>

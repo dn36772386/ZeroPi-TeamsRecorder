@@ -2,7 +2,7 @@
 """
 録音ワーカープロセス
 recorder_web.pyからの指示に基づき、実際の録音処理を担当する。
-音声インジケーター機能を追加
+シンプル版（録音中表示のみ）
 """
 
 import logging
@@ -42,8 +42,8 @@ FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
 
-# 音声インジケーター用の更新間隔（秒）
-AUDIO_STATUS_UPDATE_INTERVAL = 0.5
+# ステータス更新間隔（秒）
+STATUS_UPDATE_INTERVAL = 1.0
 
 # --- グローバル変数 ---
 status = {
@@ -102,7 +102,7 @@ def find_pulse_audio_device(device_mac):
         return None
 
 def record_audio_thread(device_mac, filename_base):
-    """ffmpegを使用した録音スレッド（音声インジケーター対応版）"""
+    """ffmpegを使用した録音スレッド（シンプル版）"""
     global status
     
     final_ogg_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
@@ -151,9 +151,7 @@ def record_audio_thread(device_mac, filename_base):
         
         # 録音監視ループ
         start_time = time.time()
-        last_size = 0
         last_status_update = time.time()
-        no_audio_count = 0  # 音声なしカウンター
         
         while not stop_recording_flag.is_set():
             # プロセスの生存確認
@@ -165,37 +163,28 @@ def record_audio_thread(device_mac, filename_base):
             current_time = time.time()
             duration = int(current_time - start_time)
             
-            # ファイルサイズで進捗確認
+            # ファイルサイズを取得
             file_size = 0
             if os.path.exists(final_ogg_filename):
                 file_size = os.path.getsize(final_ogg_filename)
-                
-                # 音声検出の簡易判定
-                if file_size > last_size:
-                    # ファイルサイズが増加している = 音声あり
-                    last_size = file_size
-                    no_audio_count = 0
-                else:
-                    # ファイルサイズが変わらない = 音声なしの可能性
-                    no_audio_count += 1
-                    
-                    # 10秒以上音声なしの場合は警告
-                    if no_audio_count > 20 and duration > 10:
-                        worker_logger.warning(f"音声が検出されない可能性があります（{no_audio_count * 0.5}秒間）")
             
-            # ステータス更新（より頻繁に）
-            if current_time - last_status_update >= AUDIO_STATUS_UPDATE_INTERVAL:
+            # ステータス更新
+            if current_time - last_status_update >= STATUS_UPDATE_INTERVAL:
                 update_status({
                     'recording_info': {
                         'duration': duration,
                         'file_size': file_size,
                         'format': 'OGG Vorbis 128kbps',
-                        'last_update': current_time  # 更新タイムスタンプ追加
+                        'last_update': current_time
                     }
                 })
                 last_status_update = current_time
+                
+                # デバッグログ（10秒ごと）
+                if duration % 10 == 0 and duration > 0:
+                    worker_logger.info(f"録音状態: {duration}秒経過, サイズ: {file_size} bytes")
             
-            time.sleep(AUDIO_STATUS_UPDATE_INTERVAL)
+            time.sleep(0.5)
 
         # 適切な停止処理
         if process.poll() is None:
@@ -218,7 +207,12 @@ def record_audio_thread(device_mac, filename_base):
                 process.terminate()
                 process.wait(timeout=5)
 
-        worker_logger.info(f"録音が正常に終了しました。最終ファイルサイズ: {file_size} bytes")
+        # 最終ファイルサイズをログ出力
+        if os.path.exists(final_ogg_filename):
+            final_size = os.path.getsize(final_ogg_filename)
+            worker_logger.info(f"録音が正常に終了しました。最終ファイルサイズ: {final_size} bytes")
+        else:
+            worker_logger.warning("録音ファイルが作成されませんでした")
 
     except subprocess.TimeoutExpired:
         worker_logger.error("プロセスの終了がタイムアウト")
@@ -269,7 +263,7 @@ def check_command():
                 update_status({'status': 'error', 'error_message': 'デバイスが指定されていません。'})
                 return
             
-            # デバイス情報を保存（音声インジケーター用）
+            # デバイス情報を保存
             device_info = {
                 'name': device.get('name', 'Unknown Device'),
                 'mac': device.get('mac') if isinstance(device, dict) else device,
