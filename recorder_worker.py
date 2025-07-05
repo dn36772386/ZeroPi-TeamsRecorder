@@ -2,11 +2,18 @@
 """
 録音ワーカープロセス
 recorder_web.pyからの指示に基づき、実際の録音処理を担当する。
+音声インジケーター機能を追加
 """
 
-# --- このブロックを丸ごと追加してください ---
 import logging
 import os
+import pyaudio
+import time
+import json
+import subprocess
+import signal
+import threading
+from datetime import datetime
 
 # このスクリプトの場所にログファイルを作成
 log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worker.log')
@@ -20,26 +27,14 @@ handler.setFormatter(formatter)
 worker_logger.addHandler(handler)
 
 worker_logger.info("--- ワーカーログ開始 ---")
-# --- ここまで追加 ---
-
-import pyaudio
-import time
-import json
-import subprocess
-import signal
-import threading
-from datetime import datetime
 
 # --- 定数（絶対パスで指定） ---
-# このスクリプト自身の場所を基準に、絶対パスを生成します
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# Webアプリと状態を共有するためのファイルを、絶対パスで指定します
+# Webアプリと状態を共有するためのファイル
 STATUS_FILE = os.path.join(APP_ROOT, "recorder_status.json")
 COMMAND_FILE = os.path.join(APP_ROOT, "recorder_command.json")
 RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
-
-ASOUNDRC_PATH = os.path.expanduser("~/.asoundrc")
 
 # 録音設定
 CHUNK = 1024
@@ -47,17 +42,18 @@ FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
 
-# --- ロギング設定 ---
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 音声インジケーター用の更新間隔（秒）
+AUDIO_STATUS_UPDATE_INTERVAL = 0.5
 
 # --- グローバル変数 ---
 status = {
     'recording': False,
-    'status': 'idle', # idle, recording, error
+    'status': 'idle',  # idle, recording, error
     'start_time': None,
     'filename': None,
     'device': None,
-    'error_message': None
+    'error_message': None,
+    'recording_info': None
 }
 stop_recording_flag = threading.Event()
 main_loop_running = True
@@ -71,7 +67,7 @@ def update_status(new_status=None):
         status.update(new_status)
     
     # 常に最新のタイムスタンプを追加する
-    status['updated_at'] = time.time()    
+    status['updated_at'] = time.time()
     try:
         with open(STATUS_FILE, 'w') as f:
             json.dump(status, f)
@@ -105,44 +101,9 @@ def find_pulse_audio_device(device_mac):
         worker_logger.error(f"PulseAudioデバイス検索エラー: {e}")
         return None
 
-def find_bluetooth_source(device_mac):
-    """PulseAudioからBluetoothソースを検索"""
-    try:
-        # PulseAudioのソース一覧を取得
-        result = subprocess.run(['pactl', 'list', 'sources'], 
-                              capture_output=True, text=True)
-        
-        # MACアドレスを正規化（:を_に変換）
-        normalized_mac = device_mac.replace(':', '_')
-        
-        sources = result.stdout.split('Source #')
-        for source in sources[1:]:  # 最初の空要素をスキップ
-            if normalized_mac in source:
-                # ソース名を抽出
-                for line in source.split('\n'):
-                    if line.strip().startswith('Name:'):
-                        source_name = line.split('Name:')[1].strip()
-                        worker_logger.info(f"Bluetoothソースを発見: {source_name}")
-                        return source_name
-        
-        # A2DPシンクのモニターを探す（音声ループバック用）
-        for source in sources[1:]:
-            if 'monitor' in source and 'bluez' in source:
-                for line in source.split('\n'):
-                    if line.strip().startswith('Name:'):
-                        source_name = line.split('Name:')[1].strip()
-                        worker_logger.info(f"Bluetoothモニターソースを発見: {source_name}")
-                        return source_name
-        
-        return None
-    except Exception as e:
-        worker_logger.error(f"Bluetoothソース検索エラー: {e}")
-        return None
-
 def record_audio_thread(device_mac, filename_base):
-    """ffmpegを使用した録音スレッド"""
+    """ffmpegを使用した録音スレッド（音声インジケーター対応版）"""
     global status
-    device_info = None
     
     final_ogg_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
     process = None
@@ -165,14 +126,20 @@ def record_audio_thread(device_mac, filename_base):
         ]
 
         worker_logger.info(f"録音開始: {' '.join(cmd)}")
-          # ステータスを先に更新
+        
+        # デバイス情報を含めてステータスを更新
         update_status({
             'recording': True,
             'status': 'recording',
             'start_time': time.time(),
             'filename': os.path.basename(final_ogg_filename),
-            'device': device_info,
-            'error_message': None
+            'device': status.get('device'),  # グローバル変数から取得
+            'error_message': None,
+            'recording_info': {
+                'duration': 0,
+                'file_size': 0,
+                'format': 'OGG Vorbis 128kbps'
+            }
         })
 
         # プロセス開始（stderrは破棄）
@@ -180,10 +147,13 @@ def record_audio_thread(device_mac, filename_base):
             cmd,
             stdin=subprocess.PIPE,  # SIGINTを送るため
             stderr=subprocess.DEVNULL  # バッファ溢れ防止
-        )        # 録音監視ループ
+        )
+        
+        # 録音監視ループ
         start_time = time.time()
         last_size = 0
         last_status_update = time.time()
+        no_audio_count = 0  # 音声なしカウンター
         
         while not stop_recording_flag.is_set():
             # プロセスの生存確認
@@ -191,38 +161,51 @@ def record_audio_thread(device_mac, filename_base):
                 worker_logger.warning("録音プロセスが予期せず終了")
                 break
             
-            # ファイルサイズで進捗確認
-            if os.path.exists(final_ogg_filename):
-                current_size = os.path.getsize(final_ogg_filename)
-                if current_size > last_size:
-                    last_size = current_size
-                    # 録音継続中                elif time.time() - start_time > 10:
-                    # 10秒以上サイズが変わらない
-                    worker_logger.warning("録音が停止している可能性")
+            # 現在の時間と経過時間
+            current_time = time.time()
+            duration = int(current_time - start_time)
             
-            # ステータス更新（1秒ごと）
-            if time.time() - last_status_update >= 1:
-                current_time = time.time()
-                duration = int(current_time - start_time)
-                file_size = os.path.getsize(final_ogg_filename) if os.path.exists(final_ogg_filename) else 0
+            # ファイルサイズで進捗確認
+            file_size = 0
+            if os.path.exists(final_ogg_filename):
+                file_size = os.path.getsize(final_ogg_filename)
                 
+                # 音声検出の簡易判定
+                if file_size > last_size:
+                    # ファイルサイズが増加している = 音声あり
+                    last_size = file_size
+                    no_audio_count = 0
+                else:
+                    # ファイルサイズが変わらない = 音声なしの可能性
+                    no_audio_count += 1
+                    
+                    # 10秒以上音声なしの場合は警告
+                    if no_audio_count > 20 and duration > 10:
+                        worker_logger.warning(f"音声が検出されない可能性があります（{no_audio_count * 0.5}秒間）")
+            
+            # ステータス更新（より頻繁に）
+            if current_time - last_status_update >= AUDIO_STATUS_UPDATE_INTERVAL:
                 update_status({
                     'recording_info': {
                         'duration': duration,
                         'file_size': file_size,
-                        'format': 'OGG Vorbis 128kbps'
+                        'format': 'OGG Vorbis 128kbps',
+                        'last_update': current_time  # 更新タイムスタンプ追加
                     }
                 })
                 last_status_update = current_time
             
-            time.sleep(0.5)
+            time.sleep(AUDIO_STATUS_UPDATE_INTERVAL)
 
         # 適切な停止処理
         if process.poll() is None:
             worker_logger.info("録音を停止します")
             # ffmpegにqキーを送信（正常終了）
-            process.stdin.write(b'q')
-            process.stdin.flush()
+            try:
+                process.stdin.write(b'q')
+                process.stdin.flush()
+            except:
+                pass  # stdin書き込みエラーは無視
             
             # 5秒待機
             for _ in range(10):
@@ -235,18 +218,20 @@ def record_audio_thread(device_mac, filename_base):
                 process.terminate()
                 process.wait(timeout=5)
 
-        worker_logger.info("録音が正常に終了しました")
+        worker_logger.info(f"録音が正常に終了しました。最終ファイルサイズ: {file_size} bytes")
 
     except subprocess.TimeoutExpired:
         worker_logger.error("プロセスの終了がタイムアウト")
-        process.kill()
+        if process:
+            process.kill()
         
     except Exception as e:
         worker_logger.error(f"録音エラー: {e}")
         update_status({'status': 'error', 'error_message': str(e)})
         if process and process.poll() is None:
             process.kill()
-    finally:        # クリーンアップ
+    finally:
+        # クリーンアップ
         update_status({
             'recording': False,
             'status': 'idle',
@@ -271,7 +256,7 @@ def check_command():
         # 読み込んだらすぐにファイルを削除
         os.remove(COMMAND_FILE)
         
-        action = command_data.get('action')  # 'action'フィールドを使用
+        action = command_data.get('action')
         worker_logger.info(f"コマンドを受信: {action}")
 
         if action == 'start':
@@ -284,7 +269,7 @@ def check_command():
                 update_status({'status': 'error', 'error_message': 'デバイスが指定されていません。'})
                 return
             
-            # デバイス情報を保存
+            # デバイス情報を保存（音声インジケーター用）
             device_info = {
                 'name': device.get('name', 'Unknown Device'),
                 'mac': device.get('mac') if isinstance(device, dict) else device,
@@ -292,7 +277,7 @@ def check_command():
                 'adapter': device.get('adapter', 'unknown')
             }
             
-            # record_audio_threadに渡すためにグローバル変数に保存
+            # グローバル変数に保存
             status['device'] = device_info
             
             device_mac = device.get('mac') if isinstance(device, dict) else device
@@ -313,7 +298,7 @@ def check_command():
         elif action == 'shutdown' or action == 'exit':
             if status['recording']:
                 stop_recording_flag.set()
-                time.sleep(2) # 録音スレッドの終了を待つ
+                time.sleep(2)  # 録音スレッドの終了を待つ
             main_loop_running = False
             worker_logger.info("終了コマンドを受信しました。")
 
@@ -328,7 +313,6 @@ def cleanup():
     if os.path.exists(COMMAND_FILE):
         os.remove(COMMAND_FILE)
     worker_logger.info("ワーカープロセスをクリーンアップしました。")
-
 
 if __name__ == '__main__':
     if not os.path.exists(RECORDINGS_DIR):

@@ -4,7 +4,7 @@ param(
     [string]$Action = "upload"
 )
 
-$RaspberryPiIP = "192.168.0.6"
+$RaspberryPiIP = "192.168.0.16"
 $User = "nakajima"
 
 Write-Host "=== Raspberry Pi Recorder Deploy Script ===" -ForegroundColor Cyan

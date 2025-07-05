@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>録音コントローラー | Raspberry Pi</title>
     <style>
         :root {
@@ -37,12 +37,16 @@
             color: var(--color-text-primary);
             font-size: 14px;
             line-height: 1.5;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .gh-header {
             background-color: var(--color-header-bg);
             color: var(--color-header-text);
             padding: 12px 24px;
+            padding-left: max(24px, env(safe-area-inset-left));
+            padding-right: max(24px, env(safe-area-inset-right));
             display: flex;
             align-items: center;
             gap: 16px;
@@ -53,14 +57,147 @@
             fill: currentColor;
         }
 
+        /* 新しい録音コントロールバー */
+        .recording-control-bar {
+            background-color: #ffffff;
+            border-bottom: 1px solid var(--color-border-default);
+            padding: 16px 24px;
+            padding-left: max(24px, env(safe-area-inset-left));
+            padding-right: max(24px, env(safe-area-inset-right));
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .recording-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex: 1;
+        }
+
+        .device-display {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background-color: var(--color-canvas-inset);
+            border-radius: 6px;
+            font-size: 13px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .device-display .device-name {
+            font-weight: 600;
+            color: var(--color-text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bluetooth-icon {
+            fill: var(--color-accent-fg);
+            flex-shrink: 0;
+        }
+
+        /* 音声インジケーター */
+        .audio-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background-color: var(--color-canvas-inset);
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .audio-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ccc;
+            transition: all 0.3s ease;
+        }
+
+        .audio-indicator.active .audio-dot {
+            background-color: #00ff00;
+            box-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .audio-status-text {
+            font-size: 13px;
+            color: var(--color-text-secondary);
+        }
+
+        .audio-indicator.active .audio-status-text {
+            color: var(--color-success-fg);
+            font-weight: 600;
+        }
+
+        /* 大きな録音ボタン */
+        .btn-record {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 8px 20px;
+            border: 1px solid rgba(27, 31, 36, 0.15);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+            min-height: 44px; /* iPhone タッチターゲット */
+        }
+
+        .btn-record.start {
+            background-color: var(--color-btn-primary-bg);
+            color: var(--color-btn-primary-text);
+        }
+
+        .btn-record.start:hover:not(:disabled) {
+            background-color: var(--color-btn-primary-hover-bg);
+        }
+
+        .btn-record.stop {
+            background-color: #fff;
+            color: var(--color-danger-fg);
+            border-color: var(--color-danger-fg);
+        }
+
+        .btn-record.stop:hover:not(:disabled) {
+            background-color: var(--color-btn-danger-hover-bg);
+            color: var(--color-btn-danger-hover-text);
+        }
+
+        .btn-record:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .page-content {
-            max-width: 1012px;
-            margin: 24px auto;
-            padding: 0 24px;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0;
         }
 
         .repo-header {
-            margin-bottom: 24px;
+            padding: 16px 24px;
+            padding-left: max(24px, env(safe-area-inset-left));
+            padding-right: max(24px, env(safe-area-inset-right));
         }
 
         .repo-name {
@@ -81,10 +218,27 @@
         .main-grid {
             display: grid;
             grid-template-columns: 1fr;
-            gap: 24px;
+            gap: 16px;
+            padding: 0 16px 24px;
+            padding-left: max(16px, env(safe-area-inset-left));
+            padding-right: max(16px, env(safe-area-inset-right));
         }
         
-        @media (min-width: 1012px) {
+        @media (min-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1.5fr 1fr;
+                gap: 24px;
+                padding: 0 24px 24px;
+                padding-left: max(24px, env(safe-area-inset-left));
+                padding-right: max(24px, env(safe-area-inset-right));
+            }
+            
+            .recording-control-bar {
+                flex-wrap: nowrap;
+            }
+        }
+        
+        @media (min-width: 1024px) {
             .main-grid {
                 grid-template-columns: 2fr 1fr;
             }
@@ -94,6 +248,7 @@
             background-color: #ffffff;
             border: 1px solid var(--color-border-default);
             border-radius: 6px;
+            overflow: hidden; /* 内容がはみ出さないように */
         }
 
         .Box-header {
@@ -115,13 +270,15 @@
         }
 
         .Box-row {
-            padding: 8px 16px;
+            padding: 12px 16px;
             border-bottom: 1px solid var(--color-border-muted);
             display: flex;
             align-items: center;
             gap: 12px;
             cursor: pointer;
             transition: background-color 0.1s ease;
+            min-height: 44px; /* iPhone タッチターゲット */
+            flex-wrap: wrap; /* モバイルで折り返し可能に */
         }
         .Box-row:last-child {
             border-bottom: none;
@@ -137,10 +294,19 @@
         
         .Box-row-icon {
             color: var(--color-text-secondary);
+            flex-shrink: 0;
         }
 
         .Box-row-content {
             flex: 1;
+            min-width: 0; /* テキストの省略表示を有効に */
+        }
+        
+        .Box-row-content a {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .Box-row-content .text-bold {
@@ -155,6 +321,27 @@
         .Box-row-actions {
             display: flex;
             gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        /* モバイルでのファイルリスト最適化 */
+        @media (max-width: 640px) {
+            .Box-row {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                padding: 12px;
+            }
+            
+            .Box-row-actions {
+                width: 100%;
+                justify-content: stretch;
+            }
+            
+            .Box-row-actions .btn {
+                flex: 1;
+                justify-content: center;
+            }
         }
 
         .status-badge {
@@ -208,6 +395,16 @@
             opacity: 0.6;
             cursor: not-allowed;
         }
+        
+        .btn-sm {
+            padding: 3px 12px;
+            font-size: 12px;
+        }
+        
+        .btn-sm .octicon {
+            width: 16px;
+            height: 16px;
+        }
 
         .btn-primary {
             background-color: var(--color-btn-primary-bg);
@@ -226,36 +423,41 @@
             background-color: var(--color-btn-danger-hover-bg);
             border-color: var(--color-btn-danger-hover-border);
         }
+        
+        /* モバイルでボタンテキストを非表示 */
+        @media (max-width: 480px) {
+            .btn-text {
+                display: none;
+            }
+            
+            .btn-sm {
+                padding: 6px 8px;
+            }
+        }
 
-        .status-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-        .status-item {
-            display: flex;
-            justify-content: space-between;
-        }
-        .status-label {
-            color: var(--color-text-secondary);
-        }
-        .status-value {
-            font-weight: 600;
-        }
-        .status-value.success { color: var(--color-success-fg); }
-        .status-value.danger { color: var(--color-danger-fg); }
-        
-        .control-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-        
         .empty-state {
             padding: 32px;
             text-align: center;
             color: var(--color-text-secondary);
+        }
+        
+        .Box-footer {
+            padding: 8px 16px; 
+            border-top: 1px solid var(--color-border-default);
+            background-color: var(--color-canvas-inset);
+        }
+        
+        /* デバイスリストボックスの高さ制限 */
+        .sidebar .Box {
+            max-height: calc(100vh - 200px);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #device-list {
+            overflow-y: auto;
+            flex: 1;
+            min-height: 200px;
         }
 
         .spinner {
@@ -268,74 +470,26 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .recording-indicator {
+        /* 録音中タイマー表示 */
+        .recording-timer {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
             background-color: #FFFBDD;
             border: 1px solid #EAC54F;
             border-radius: 6px;
-            padding: 16px;
-            margin-bottom: 16px;
-        }
-        .recording-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
             font-weight: 600;
             color: #BF8700;
         }
-        .recording-body {
-            margin-top: 8px;
-            font-size: 24px;
-            font-weight: 600;
-            font-family: monospace;
-            text-align: center;
-        }
-        .recording-body small {
-            display: block;
-            font-size: 12px;
-            color: var(--color-text-secondary);
+
+        .recording-timer.active {
+            display: flex;
         }
 
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            padding: 8px;
-            border-radius: 6px;
-            margin-bottom: 16px;
-        }
-        .status-indicator-idle {
-            background-color: #F0F4F8;
-            color: #333;
-        }
-        .status-indicator-recording {
-            background-color: #E1F5FE;
-            color: #0277BD;
-        }
-        .status-indicator-error {
-            background-color: #FFEBEE;
-            color: #C62828;
-        }
-        .status-icon {
-            width: 16px;
-            height: 16px;
-            margin-right: 8px;
-        }        .timer-display {
+        .recording-timer .timer-text {
             font-family: monospace;
-            font-size: 16px;
-            font-weight: 500;
-            margin-bottom: 8px;
-        }
-        
-        .device-info {
-            font-size: 12px;
-            color: var(--color-text-secondary);
-            margin-top: 4px;
-        }
-        
-        .recording-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-top: 8px;
+            font-size: 18px;
         }
 
         .user-message {
@@ -356,6 +510,58 @@
             background-color: #FFEBEE;
             color: #C62828;
         }
+
+        /* モバイル最適化 */
+        @media (max-width: 767px) {
+            .recording-control-bar {
+                padding: 12px 16px;
+                gap: 12px;
+            }
+
+            .device-display {
+                flex: 1 1 100%;
+                order: 3;
+            }
+
+            .recording-controls {
+                flex: 1 1 100%;
+                justify-content: space-between;
+                order: 1;
+            }
+
+            .audio-indicator {
+                order: 2;
+            }
+
+            .main-grid {
+                padding: 0 16px 16px;
+            }
+
+            .repo-header {
+                padding: 16px;
+            }
+            
+            /* デバイスリストボックスの高さ制限 */
+            .sidebar .Box {
+                max-height: calc(100vh - 200px);
+                display: flex;
+                flex-direction: column;
+            }
+            
+            #device-list {
+                overflow-y: auto;
+                flex: 1;
+                min-height: 200px;
+            }
+            
+            /* Bluetoothデバイスリストの最適化 */
+            .Box-footer {
+                position: sticky;
+                bottom: 0;
+                background-color: #ffffff;
+                box-shadow: 0 -1px 3px rgba(0,0,0,0.1);
+            }
+        }
     </style>
 </head>
 <body>
@@ -366,6 +572,43 @@
         </svg>
         <span>ZeroPi-TeamsRecorder</span>
     </header>
+
+    <!-- 新しい録音コントロールバー -->
+    <div class="recording-control-bar">
+        <div class="recording-controls">
+            <button id="start-button" class="btn-record start" onclick="startRecording()" disabled>
+                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.379 5.227A.75.75 0 0 1 7.5 5.75v4.5a.75.75 0 0 1-1.121.623l-3.5-2.25a.75.75 0 0 1 0-1.246l3.5-2.25z"></path></svg>
+                録音開始
+            </button>
+            <button id="stop-button" class="btn-record stop" onclick="stopRecording()" disabled style="display: none;">
+                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.25 6.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3.5 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"></path></svg>
+                録音停止
+            </button>
+
+            <!-- 録音中タイマー -->
+            <div class="recording-timer" id="recording-timer">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <circle cx="8" cy="8" r="6" fill="currentColor" opacity="0.3"/>
+                    <circle cx="8" cy="8" r="3" fill="currentColor"/>
+                </svg>
+                <span class="timer-text" id="timer">00:00:00</span>
+            </div>
+        </div>
+
+        <!-- 音声インジケーター -->
+        <div class="audio-indicator" id="audio-indicator">
+            <span class="audio-dot"></span>
+            <span class="audio-status-text" id="audio-status-text">待機中</span>
+        </div>
+
+        <!-- デバイス表示 -->
+        <div class="device-display">
+            <svg class="bluetooth-icon" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M3.75 0a.75.75 0 0 0-1.5 0v4.333L.97 3.05a.75.75 0 0 0-1.06 1.06L2.5 6.75v2.5L-.11 11.89a.75.75 0 1 0 1.06 1.06l1.28-1.28V16a.75.75 0 0 0 1.5 0v-4.333l1.28 1.28a.75.75 0 0 0 1.06-1.06L3.75 9.25v-2.5l2.61-2.64a.75.75 0 0 0-1.06-1.06L3.75 4.333V0Zm1.5 6L7.86 3.39a.75.75 0 0 1 1.06 1.06L6.31 7.06a.75.75 0 0 1 0 1.06l2.61 2.61a.75.75 0 1 1-1.06 1.06L5.25 9.18v-3.18Zm3.69 2.61L11.55 6l-2.61-2.61a.75.75 0 0 1 1.06-1.06l3.16 3.16a.75.75 0 0 1 0 1.06l-3.16 3.16a.75.75 0 1 1-1.06-1.06Z"></path>
+            </svg>
+            <span class="device-name" id="device-name">デバイス未選択</span>
+        </div>
+    </div>
 
     <div class="page-content">
         <div class="repo-header">
@@ -380,23 +623,6 @@
 
         <div class="main-grid">
             <div class="main-content">
-                <div class="recording-indicator" id="recording-indicator" style="display: none;">
-                    <div class="recording-header">
-                        <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-broadcast">
-                            <path d="M8 12.25a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"></path><path d="M5.25 8a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Z"></path>
-                        </svg>
-                        <span>録音中です...</span>                    </div>
-                    <div class="recording-body">
-                        <span id="timer">00:00:00</span>
-                        <small id="filename"></small>
-                        <div class="device-info" id="device-info"></div>
-                        <div class="recording-stats">
-                            <small id="file-size"></small>
-                            <small id="recording-format"></small>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="Box">
                     <div class="Box-header">
                         <h3 class="Box-title">録音ファイル</h3>
@@ -405,33 +631,11 @@
                         <!-- ファイルリストがここに動的に挿入されます -->
                     </div>
                 </div>
+                <div id="user-message" class="user-message"></div>
             </div>
 
             <div class="sidebar">
                 <div class="Box">
-                    <div class="Box-header">
-                        <h3 class="Box-title">コントロール</h3>
-                    </div>
-                    <div class="Box-body">                        <div id="status-indicator" class="status-indicator-idle">
-                            <span class="status-icon"></span>
-                            <span id="status-text">待機中</span>
-                        </div>
-                        
-                        <div class="control-buttons">
-                            <button id="start-button" class="btn btn-primary" onclick="startRecording()" disabled>
-                                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.379 5.227A.75.75 0 0 1 7.5 5.75v4.5a.75.75 0 0 1-1.121.623l-3.5-2.25a.75.75 0 0 1 0-1.246l3.5-2.25z"></path></svg>
-                                録音開始
-                            </button>
-                            <button id="stop-button" class="btn btn-danger" onclick="stopRecording()" disabled>
-                                <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.25 6.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3.5 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"></path></svg>
-                                録音停止
-                            </button>
-                        </div>
-                        <div id="user-message" class="user-message"></div>
-                    </div>
-                </div>
-
-                <div class="Box" style="margin-top: 24px;">
                     <div class="Box-header">
                         <h3 class="Box-title">Bluetoothデバイス</h3>
                         <button class="btn" onclick="refreshDevices()" id="refresh-btn">
@@ -444,7 +648,7 @@
                             <p>デバイスを読み込み中...</p>
                         </div>
                     </div>
-                    <div class="Box-footer" style="padding: 8px 16px; border-top: 1px solid var(--color-border-default);">
+                    <div class="Box-footer">
                         <button class="btn" style="width: 100%;" onclick="saveSelectedDevice()" id="save-btn" disabled>
                             このデバイスを使用する
                         </button>
@@ -459,6 +663,7 @@
         let statusInterval;
         let timerInterval;
         let recordingStartTime;
+        let lastFileSize = 0;
 
         // === 初期化処理 ===
         document.addEventListener('DOMContentLoaded', () => {
@@ -479,10 +684,18 @@
         function updateButtonStates() {
             const startBtn = document.getElementById('start-button');
             const stopBtn = document.getElementById('stop-button');
-            const isRecording = document.getElementById('status-indicator').classList.contains('status-indicator-recording');
+            const recordingTimer = document.getElementById('recording-timer');
+            const isRecording = recordingTimer.classList.contains('active');
 
-            startBtn.disabled = isRecording || !selectedDevice;
-            stopBtn.disabled = !isRecording;
+            if (isRecording) {
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-flex';
+                stopBtn.disabled = false;
+            } else {
+                startBtn.style.display = 'inline-flex';
+                stopBtn.style.display = 'none';
+                startBtn.disabled = !selectedDevice;
+            }
         }
 
         function updateTimer() {
@@ -493,6 +706,31 @@
             const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
             const seconds = String(elapsed % 60).padStart(2, '0');
             document.getElementById('timer').textContent = `${hours}:${minutes}:${seconds}`;
+        }
+
+        // 音声レベル更新関数
+        function updateAudioStatus(data) {
+            const indicator = document.getElementById('audio-indicator');
+            const statusText = document.getElementById('audio-status-text');
+            
+            if (data.recording && data.recording_info && data.recording_info.file_size) {
+                const currentSize = data.recording_info.file_size;
+                const sizeIncreased = currentSize > (window.lastFileSize || 0);
+                
+                if (sizeIncreased) {
+                    indicator.classList.add('active');
+                    statusText.textContent = '録音中';
+                } else {
+                    indicator.classList.remove('active');  
+                    statusText.textContent = '無音？';
+                }
+                
+                window.lastFileSize = currentSize;
+            } else {
+                indicator.classList.remove('active');
+                statusText.textContent = '待機中';
+                window.lastFileSize = 0;
+            }
         }
 
         // === データ取得・操作関数 ===
@@ -529,9 +767,21 @@
                         `;
                         deviceList.appendChild(row);
                     });
+
+                    // 現在のデバイスが選択されている場合、それを選択状態にする
+                    if (data.current_device) {
+                        data.devices.forEach((device, index) => {
+                            if (device.mac === data.current_device.mac) {
+                                deviceList.children[index].classList.add('selected');
+                                selectedDevice = device;
+                                document.getElementById('device-name').textContent = device.name;
+                            }
+                        });
+                    }
                 } else {
                     deviceList.innerHTML = '<div class="Box-row">利用可能なデバイスが見つかりません。</div>';
                 }
+                updateButtonStates();
             } catch (error) {
                 console.error('デバイス一覧の取得に失敗:', error);
                 deviceList.innerHTML = '<div class="Box-row text-danger">デバイス一覧の取得に失敗しました。</div>';
@@ -544,6 +794,7 @@
             // 新しいデバイスを選択
             element.classList.add('selected');
             selectedDevice = device;
+            document.getElementById('device-name').textContent = device.name;
             showMessage(`デバイス「${device.name}」を選択しました。`);
 
             try {
@@ -556,11 +807,12 @@
                 if (result.success) {
                     showMessage(result.message, 'success');
                     // 接続状態をチェックしてUIを更新
-                    await checkConnection(device.mac);
+                    await checkConnection(device);
                 } else {
                     showMessage(result.message, 'error');
                     selectedDevice = null;
                     element.classList.remove('selected');
+                    document.getElementById('device-name').textContent = 'デバイス未選択';
                 }
             } catch (error) {
                 showMessage('デバイスの保存に失敗しました。', 'error');
@@ -569,21 +821,20 @@
             updateButtonStates();
         }
 
-        async function checkConnection(mac_address) {
+        async function checkConnection(device) {
             try {
-                // GETではなく、サーバーの仕様に合わせてPOSTでリクエストを送信する
                 const response = await fetch('/check_connection', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ mac: mac_address }) // データをJSON形式で送信
+                    body: JSON.stringify(device)
                 });
                 const data = await response.json();
                 if (data.connected) {
-                    showMessage(`デバイス ${mac_address} に接続済みです。`, 'success');
+                    showMessage(`デバイス ${device.name} に接続済みです。`, 'success');
                 } else {
-                    showMessage(`デバイス ${mac_address} への接続を試みています...`, 'info');
+                    showMessage(`デバイス ${device.name} への接続を試みています...`, 'info');
                 }
                 // デバイスリストを再読み込みして状態バッジを更新
                 loadDevices();
@@ -595,30 +846,17 @@
         async function updateStatus() {
             try {
                 const response = await fetch('/get_status');
-                const data = await response.json();                const statusIndicator = document.getElementById('status-indicator');
-                const statusText = document.getElementById('status-text');
+                const data = await response.json();
                 const ipAddressEl = document.getElementById('ip-address');
-                const recordingIndicator = document.getElementById('recording-indicator');
+                const recordingTimer = document.getElementById('recording-timer');
 
                 ipAddressEl.textContent = `IP: ${data.ip_address || '-.--.--.--'}`;
 
                 if (data.recording) {
-                    statusIndicator.className = 'status-indicator-recording';
-                    statusText.textContent = `録音中: ${data.filename || ''}`;
-                    recordingIndicator.style.display = 'block';
+                    recordingTimer.classList.add('active');
                     
-                    // デバイス情報の表示
-                    if (data.device) {
-                        document.getElementById('device-info').textContent = 
-                            `デバイス: ${data.device.name} (${data.device.type})`;
-                    }
-                    
-                    // 録音情報の表示
-                    if (data.recording_info) {
-                        const sizeMB = (data.recording_info.file_size / 1024 / 1024).toFixed(1);
-                        document.getElementById('file-size').textContent = `サイズ: ${sizeMB} MB`;
-                        document.getElementById('recording-format').textContent = data.recording_info.format;
-                    }
+                    // 音声レベル更新
+                    updateAudioStatus(data);
                     
                     // タイマーの更新
                     if (!timerInterval) {
@@ -627,24 +865,18 @@
                         timerInterval = setInterval(updateTimer, 1000);
                     }
                 } else {
-                    recordingIndicator.style.display = 'none';
-                    statusIndicator.className = 'status-indicator-idle';
-                    statusText.textContent = '待機中';
+                    recordingTimer.classList.remove('active');
                     if (data.status === 'error') {
-                        statusIndicator.className = 'status-indicator-error';
-                        statusText.textContent = `エラー: ${data.error_message}`;
+                        showMessage(`エラー: ${data.error_message}`, 'error');
                     }
                     clearInterval(timerInterval);
                     timerInterval = null;
                     document.getElementById('timer').textContent = '00:00:00';
+                    updateAudioStatus(data);
                 }
                 updateButtonStates();
             } catch (error) {
                 console.error('ステータスの更新に失敗:', error);
-                const statusIndicator = document.getElementById('status-indicator');
-                const statusText = document.getElementById('status-text');
-                statusIndicator.className = 'status-indicator-error';
-                statusText.textContent = 'サーバー接続断';
                 clearInterval(timerInterval);
                 timerInterval = null;
             }
@@ -696,9 +928,9 @@
             clearInterval(timerInterval);
             timerInterval = null;
             document.getElementById('timer').textContent = '00:00:00';
-            document.getElementById('status-indicator').className = 'status-indicator-idle';
-            document.getElementById('status-text').textContent = '待機中';
+            document.getElementById('recording-timer').classList.remove('active');
             updateButtonStates();
+            updateAudioStatus({recording: false});
             setTimeout(updateFileList, 1000); // ファイルリストの更新を少し遅らせる
         }
 
@@ -720,11 +952,17 @@
                                 </svg>
                             </div>
                             <div class="Box-row-content">
-                                <a href="/download/${file}" style="text-decoration: none; color: inherit;">${file}</a>
+                                <a href="/download/${file}" style="text-decoration: none; color: inherit;" title="${file}">${file}</a>
                             </div>
                             <div class="Box-row-actions">
-                                <button class="btn" onclick="downloadFile('${file}')">Download</button>
-                                <button class="btn btn-danger" onclick="deleteFile('${file}')">Delete</button>
+                                <button class="btn btn-sm" onclick="downloadFile('${file}')">
+                                    <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"></path><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"></path></svg>
+                                    <span class="btn-text">Download</span>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteFile('${file}')">
+                                    <svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z"></path></svg>
+                                    <span class="btn-text">Delete</span>
+                                </button>
                             </div>
                         </div>
                     `).join('');
