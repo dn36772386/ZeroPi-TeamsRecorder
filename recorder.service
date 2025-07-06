@@ -1,6 +1,7 @@
 [Unit]
 Description=ZeroPi Teams Recorder Service
-After=network.target
+After=network.target redis.service avahi-daemon.service
+Requires=redis.service
 
 [Service]
 User=nakajima
@@ -10,9 +11,14 @@ WorkingDirectory=/home/nakajima
 Environment="XDG_RUNTIME_DIR=/run/user/1000"
 Environment="HOME=/home/nakajima"
 Environment="PULSE_RUNTIME_PATH=/run/user/1000/pulse"
-ExecStart=/usr/bin/python3 /home/nakajima/recorder_web.py
+# Pythonスクリプトを両方起動
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash -c '/usr/bin/python3 /home/nakajima/recorder_worker.py & /usr/bin/python3 /home/nakajima/recorder_web.py'
 Restart=always
 RestartSec=5
+# tmpディレクトリ設定
+PrivateTmp=false
+ReadWritePaths=/tmp/recorder
 
 [Install]
 WantedBy=multi-user.target

@@ -1,139 +1,294 @@
 #!/usr/bin/env python3
 """
-録音ワーカープロセス
-recorder_web.pyからの指示に基づき、実際の録音処理を担当する。
-シンプル版（録音中表示のみ）
+録音ワーカープロセス（Redis/音声レベル対応版）
 """
 
 import logging
 import os
-import pyaudio
 import time
 import json
 import subprocess
 import signal
 import threading
+import redis
+import numpy as np
 from datetime import datetime
 
-# このスクリプトの場所にログファイルを作成
-log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worker.log')
+# tmpディレクトリ（SDカード保護）
+TEMP_DIR = "/tmp/recorder"
+LOG_FILE = os.path.join(TEMP_DIR, "worker.log")
+
+# ディレクトリ作成
+if not os.path.exists(TEMP_DIR):
+    os.makedirs(TEMP_DIR)
 
 # ロガーの設定
 worker_logger = logging.getLogger('WorkerLogger')
 worker_logger.setLevel(logging.INFO)
-handler = logging.FileHandler(log_file_path)
+handler = logging.FileHandler(LOG_FILE)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 worker_logger.addHandler(handler)
 
 worker_logger.info("--- ワーカーログ開始 ---")
 
-# --- 定数（絶対パスで指定） ---
+# 定数
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
-
-# Webアプリと状態を共有するためのファイル
-STATUS_FILE = os.path.join(APP_ROOT, "recorder_status.json")
-COMMAND_FILE = os.path.join(APP_ROOT, "recorder_command.json")
 RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
-
-# 録音設定
 CHUNK = 1024
-FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
 
-# ステータス更新間隔（秒）
-STATUS_UPDATE_INTERVAL = 1.0
+# Redis接続
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    redis_client.ping()
+    worker_logger.info("Redis接続成功")
+except Exception as e:
+    worker_logger.error(f"Redis接続失敗: {e}")
+    exit(1)
 
-# --- グローバル変数 ---
-status = {
-    'recording': False,
-    'status': 'idle',  # idle, recording, error
-    'start_time': None,
-    'filename': None,
-    'device': None,
-    'error_message': None,
-    'recording_info': None
-}
+# グローバル変数
 stop_recording_flag = threading.Event()
 main_loop_running = True
+recording_process = None
+audio_monitor_thread = None
 
-# --- 関数 ---
-
-def update_status(new_status=None):
-    """現在の状態をJSONファイルに書き出す"""
-    global status
-    if new_status:
-        status.update(new_status)
-    
-    # 常に最新のタイムスタンプを追加する
-    status['updated_at'] = time.time()
+def initialize_redis_status():
+    """起動時にRedisステータスを初期化"""
     try:
-        with open(STATUS_FILE, 'w') as f:
-            json.dump(status, f)
+        # 既存のステータスをクリア
+        redis_client.delete("recorder:status")
+        
+        # 初期ステータスを設定
+        initial_status = {
+            'recording': 'false',
+            'status': 'idle',
+            'pid': str(os.getpid()),
+            'updated_at': str(time.time()),
+            'start_time': 'null',
+            'filename': 'null',
+            'device': 'null',
+            'error_message': 'null',
+            'recording_info': 'null'
+        }
+        
+        redis_client.hmset("recorder:status", initial_status)
+        worker_logger.info("Redisステータスを初期化しました")
+        
+        # コマンドキューもクリア
+        redis_client.delete("recorder:commands")
+        worker_logger.info("コマンドキューをクリアしました")
+        
     except Exception as e:
-        worker_logger.error(f"ステータスファイルの書き込みに失敗: {e}")
+        worker_logger.error(f"Redis初期化エラー: {e}")
+
+def update_status(status_dict):
+    """Redisにステータスを更新"""
+    try:
+        # 更新用の辞書を作成
+        processed_dict = {}
+        
+        for key, value in status_dict.items():
+            if value is None:
+                # Noneの場合は文字列'null'として保存
+                processed_dict[key] = 'null'
+            elif key in ['device', 'recording_info']:
+                # 辞書の場合はJSON文字列に変換
+                if isinstance(value, dict):
+                    processed_dict[key] = json.dumps(value)
+                else:
+                    processed_dict[key] = str(value)
+            else:
+                # その他は文字列に変換
+                processed_dict[key] = str(value)
+        
+        # 更新時刻を追加
+        processed_dict['updated_at'] = str(time.time())
+        
+        # Redisに保存
+        redis_client.hmset("recorder:status", processed_dict)
+        redis_client.publish("recorder:status_update", "update")
+        
+    except Exception as e:
+        worker_logger.error(f"ステータス更新エラー: {e}")
 
 def find_pulse_audio_device(device_mac):
-    """PulseAudioから適切なデバイス（sourceまたはsink.monitor）を検索"""
+    """PulseAudioから適切なデバイスを検索"""
     try:
-        # MACアドレスを正規化（:を_に変換） 
         normalized_mac = device_mac.replace(':', '_')
+        worker_logger.info(f"デバイスを検索中: MAC={device_mac}, normalized={normalized_mac}")
         
-        # pactl list sourcesでソース一覧を取得
         result = subprocess.run(['pactl', 'list', 'sources', 'short'], 
                               capture_output=True, text=True, timeout=10)
         
         if result.returncode == 0:
+            worker_logger.info(f"利用可能なソース:")
             for line in result.stdout.strip().split('\n'):
                 parts = line.split('\t')
                 if len(parts) >= 2:
                     source_name = parts[1]
-                    # sourceまたはsink.monitorでMACアドレスが含まれているものを探す
-                    if normalized_mac in source_name:
+                    worker_logger.info(f"  - {source_name}")
+                    
+                    # より柔軟なマッチング
+                    if normalized_mac.lower() in source_name.lower():
                         worker_logger.info(f"PulseAudioデバイスを発見: {source_name}")
+                        return source_name
+            
+            # もしくは、Bluetoothで始まるソースを探す
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    source_name = parts[1]
+                    if 'bluez' in source_name.lower():
+                        worker_logger.info(f"Bluetoothソースを発見（MACが一致しない場合のフォールバック）: {source_name}")
+                        # 念のため確認メッセージ
+                        worker_logger.warning(f"警告: MACアドレス {device_mac} と完全一致しないが、Bluetoothソース {source_name} を使用します")
                         return source_name
         
         worker_logger.warning(f"MACアドレス {device_mac} に対応するPulseAudioデバイスが見つかりません")
+        worker_logger.warning("Bluetoothデバイスが接続されていることを確認してください")
         return None
         
     except Exception as e:
         worker_logger.error(f"PulseAudioデバイス検索エラー: {e}")
         return None
 
-def record_audio_thread(device_mac, filename_base):
-    """ffmpegを使用した録音スレッド（シンプル版）"""
-    global status
-    
-    final_ogg_filename = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
-    process = None
+def monitor_audio_levels(source_name):
+    """音声レベルをモニタリングしてRedisに送信"""
+    try:
+        # parecordで音声データを取得
+        cmd = [
+            'parec',
+            '--device=' + source_name,
+            '--format=s16le',
+            '--rate=' + str(RATE),
+            '--channels=' + str(CHANNELS),
+            '--latency-msec=10'
+        ]
+        
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        worker_logger.info("音声レベルモニタリング開始")
+        
+        while not stop_recording_flag.is_set():
+            # 音声データを読み取り
+            data = process.stdout.read(CHUNK * 2)  # 16bit = 2bytes
+            if not data:
+                break
+            
+            # numpy配列に変換してRMS計算
+            audio_array = np.frombuffer(data, dtype=np.int16)
+            if len(audio_array) > 0:
+                rms = np.sqrt(np.mean(audio_array.astype(np.float32)**2))
+                # 正規化（0-1の範囲）
+                normalized_level = min(rms / 32768.0, 1.0)
+                # dB変換（無音時は-60dB）
+                if normalized_level > 0:
+                    db_level = 20 * np.log10(normalized_level)
+                else:
+                    db_level = -60
+                
+                # Redisに送信
+                level_data = {
+                    'level': float(normalized_level),
+                    'db': float(db_level),
+                    'timestamp': time.time()
+                }
+                redis_client.publish('recorder:audio_level', json.dumps(level_data))
+        
+        process.terminate()
+        worker_logger.info("音声レベルモニタリング終了")
+        
+    except Exception as e:
+        worker_logger.error(f"音声レベルモニタリングエラー: {e}")
 
+def cleanup_temp_files():
+    """起動時に残っている一時ファイルをクリーンアップ"""
+    try:
+        temp_files_removed = 0
+        for f in os.listdir(TEMP_DIR):
+            if f.endswith('.ogg') or f.endswith('.wav'):
+                try:
+                    file_path = os.path.join(TEMP_DIR, f)
+                    # ファイルが空でない場合は保存
+                    if os.path.getsize(file_path) > 0:
+                        # recordingsディレクトリに移動
+                        final_path = os.path.join(RECORDINGS_DIR, f)
+                        os.rename(file_path, final_path)
+                        worker_logger.info(f"未完了の録音ファイルを保存: {f}")
+                    else:
+                        # 空ファイルは削除
+                        os.remove(file_path)
+                        temp_files_removed += 1
+                except Exception as e:
+                    worker_logger.error(f"一時ファイル処理エラー ({f}): {e}")
+        
+        if temp_files_removed > 0:
+            worker_logger.info(f"{temp_files_removed}個の一時ファイルを削除しました")
+            
+    except Exception as e:
+        worker_logger.error(f"一時ファイルクリーンアップエラー: {e}")
+
+def record_audio_thread(device_mac, filename_base):
+    """録音処理スレッド（音声レベル対応）"""
+    global recording_process, audio_monitor_thread
+    
+    # 一時ファイルパス（tmpfs使用）
+    temp_ogg_path = os.path.join(TEMP_DIR, f"{filename_base}.ogg")
+    final_ogg_path = os.path.join(RECORDINGS_DIR, f"{filename_base}.ogg")
+    
     try:
         # PulseAudioデバイスを検索
         source_name = find_pulse_audio_device(device_mac)
         if not source_name:
-            raise Exception(f"Bluetoothデバイス {device_mac} が見つかりません")
-
-        # ffmpegで直接OGG録音
+            # フォールバック: デフォルトのソースを使用
+            worker_logger.warning("特定のBluetoothデバイスが見つかりません。デフォルトソースを使用します。")
+            cmd_check = ['pactl', 'info']
+            result = subprocess.run(cmd_check, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'Default Source:' in line:
+                        source_name = line.split(':', 1)[1].strip()
+                        worker_logger.info(f"デフォルトソースを使用: {source_name}")
+                        break
+            
+            if not source_name:
+                raise Exception(f"Bluetoothデバイス {device_mac} が見つかりません。デバイスが接続されていることを確認してください。")
+        
+        # 音声レベルモニタリングスレッド開始
+        audio_monitor_thread = threading.Thread(
+            target=monitor_audio_levels, 
+            args=(source_name,), 
+            daemon=True
+        )
+        audio_monitor_thread.start()
+        
+        # ffmpegで録音（tmpfsに保存）
         cmd = [
             'ffmpeg',
             '-f', 'pulse',
             '-i', source_name,
             '-acodec', 'libvorbis',
-            '-ab', '128k',  # ビットレート
-            '-y',  # 上書き許可
-            final_ogg_filename
+            '-ab', '128k',
+            '-y',
+            temp_ogg_path
         ]
-
+        
         worker_logger.info(f"録音開始: {' '.join(cmd)}")
         
-        # デバイス情報を含めてステータスを更新
+        # ステータス更新
+        device_info = {
+            'name': redis_client.hget("recorder:config", "selected_device_name") or "Unknown",
+            'mac': device_mac,
+            'type': 'Bluetooth Audio Source'
+        }
+        
         update_status({
-            'recording': True,
+            'recording': 'true',
             'status': 'recording',
             'start_time': time.time(),
-            'filename': os.path.basename(final_ogg_filename),
-            'device': status.get('device'),  # グローバル変数から取得
+            'filename': os.path.basename(final_ogg_path),
+            'device': device_info,
             'error_message': None,
             'recording_info': {
                 'duration': 0,
@@ -141,93 +296,67 @@ def record_audio_thread(device_mac, filename_base):
                 'format': 'OGG Vorbis 128kbps'
             }
         })
-
-        # プロセス開始（stderrは破棄）
-        process = subprocess.Popen(
+        
+        # プロセス開始
+        recording_process = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,  # SIGINTを送るため
-            stderr=subprocess.DEVNULL  # バッファ溢れ防止
+            stdin=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
         )
         
         # 録音監視ループ
         start_time = time.time()
-        last_status_update = time.time()
         
         while not stop_recording_flag.is_set():
-            # プロセスの生存確認
-            if process.poll() is not None:
+            if recording_process.poll() is not None:
                 worker_logger.warning("録音プロセスが予期せず終了")
                 break
             
-            # 現在の時間と経過時間
-            current_time = time.time()
-            duration = int(current_time - start_time)
+            duration = int(time.time() - start_time)
             
-            # ファイルサイズを取得
+            # ファイルサイズ確認
             file_size = 0
-            if os.path.exists(final_ogg_filename):
-                file_size = os.path.getsize(final_ogg_filename)
+            if os.path.exists(temp_ogg_path):
+                file_size = os.path.getsize(temp_ogg_path)
             
             # ステータス更新
-            if current_time - last_status_update >= STATUS_UPDATE_INTERVAL:
-                update_status({
-                    'recording_info': {
-                        'duration': duration,
-                        'file_size': file_size,
-                        'format': 'OGG Vorbis 128kbps',
-                        'last_update': current_time
-                    }
-                })
-                last_status_update = current_time
-                
-                # デバッグログ（10秒ごと）
-                if duration % 10 == 0 and duration > 0:
-                    worker_logger.info(f"録音状態: {duration}秒経過, サイズ: {file_size} bytes")
+            update_status({
+                'recording_info': {
+                    'duration': duration,
+                    'file_size': file_size,
+                    'format': 'OGG Vorbis 128kbps'
+                }
+            })
             
             time.sleep(0.5)
-
-        # 適切な停止処理
-        if process.poll() is None:
+        
+        # 録音停止
+        if recording_process.poll() is None:
             worker_logger.info("録音を停止します")
-            # ffmpegにqキーを送信（正常終了）
             try:
-                process.stdin.write(b'q')
-                process.stdin.flush()
+                recording_process.stdin.write(b'q')
+                recording_process.stdin.flush()
             except:
-                pass  # stdin書き込みエラーは無視
+                pass
             
-            # 5秒待機
-            for _ in range(10):
-                if process.poll() is not None:
-                    break
-                time.sleep(0.5)
-            
-            # まだ終了していなければSIGTERM
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=5)
-
-        # 最終ファイルサイズをログ出力
-        if os.path.exists(final_ogg_filename):
-            final_size = os.path.getsize(final_ogg_filename)
-            worker_logger.info(f"録音が正常に終了しました。最終ファイルサイズ: {final_size} bytes")
-        else:
-            worker_logger.warning("録音ファイルが作成されませんでした")
-
+            recording_process.wait(timeout=5)
+        
+        # ファイルを最終保存場所に移動
+        if os.path.exists(temp_ogg_path) and os.path.getsize(temp_ogg_path) > 0:
+            os.rename(temp_ogg_path, final_ogg_path)
+            worker_logger.info(f"録音ファイルを保存: {final_ogg_path}")
+        
     except subprocess.TimeoutExpired:
         worker_logger.error("プロセスの終了がタイムアウト")
-        if process:
-            process.kill()
-        
+        if recording_process:
+            recording_process.kill()
     except Exception as e:
         worker_logger.error(f"録音エラー: {e}")
         update_status({'status': 'error', 'error_message': str(e)})
-        if process and process.poll() is None:
-            process.kill()
     finally:
         # クリーンアップ
         update_status({
-            'recording': False,
+            'recording': 'false',
             'status': 'idle',
             'start_time': None,
             'filename': None,
@@ -235,101 +364,107 @@ def record_audio_thread(device_mac, filename_base):
             'recording_info': None
         })
         stop_recording_flag.clear()
-        worker_logger.info("録音処理が完了しました。")
+        worker_logger.info("録音処理が完了しました")
 
-def check_command():
-    """コマンドファイルを確認し、処理を実行する"""
+def process_commands():
+    """Redisからコマンドを取得して処理"""
     global main_loop_running
-    if not os.path.exists(COMMAND_FILE):
-        return
-
+    
     try:
-        with open(COMMAND_FILE, 'r') as f:
-            command_data = json.load(f)
+        # ブロッキングでコマンドを待機（タイムアウト1秒）
+        result = redis_client.brpop("recorder:commands", timeout=1)
+        if not result:
+            return
         
-        # 読み込んだらすぐにファイルを削除
-        os.remove(COMMAND_FILE)
-        
+        _, command_json = result
+        command_data = json.loads(command_json)
         action = command_data.get('action')
+        
         worker_logger.info(f"コマンドを受信: {action}")
-
+        
         if action == 'start':
-            if status['recording']:
-                worker_logger.warning("すでに録音中のため、新しい録音は開始しません。")
+            if redis_client.hget("recorder:status", "recording") == 'true':
+                worker_logger.warning("すでに録音中のため、新しい録音は開始しません")
                 return
             
             device = command_data.get('device')
             if not device:
-                update_status({'status': 'error', 'error_message': 'デバイスが指定されていません。'})
+                update_status({'status': 'error', 'error_message': 'デバイスが指定されていません'})
                 return
             
-            # デバイス情報を保存
-            device_info = {
-                'name': device.get('name', 'Unknown Device'),
-                'mac': device.get('mac') if isinstance(device, dict) else device,
-                'type': 'Bluetooth Audio Source',
-                'adapter': device.get('adapter', 'unknown')
-            }
-            
-            # グローバル変数に保存
-            status['device'] = device_info
+            # デバイス情報をログに記録
+            worker_logger.info(f"デバイス情報: {device}")
             
             device_mac = device.get('mac') if isinstance(device, dict) else device
+            device_name = device.get('name', 'Unknown') if isinstance(device, dict) else 'Unknown'
+            
+            worker_logger.info(f"録音開始: デバイス名={device_name}, MAC={device_mac}")
+            
+            # デバイス名を設定に保存
+            redis_client.hset("recorder:config", "selected_device_name", device_name)
             
             filename_base = f"recording_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
             
             stop_recording_flag.clear()
-            thread = threading.Thread(target=record_audio_thread, args=(device_mac, filename_base))
-            thread.daemon = True
+            thread = threading.Thread(
+                target=record_audio_thread, 
+                args=(device_mac, filename_base),
+                daemon=True
+            )
             thread.start()
-
+            
         elif action == 'stop':
-            if status['recording']:
+            if redis_client.hget("recorder:status", "recording") == 'true':
                 stop_recording_flag.set()
             else:
-                worker_logger.warning("録音中ではないため、停止コマンドは無視します。")
-
+                worker_logger.warning("録音中ではないため、停止コマンドは無視します")
+                
         elif action == 'shutdown' or action == 'exit':
-            if status['recording']:
+            if redis_client.hget("recorder:status", "recording") == 'true':
                 stop_recording_flag.set()
-                time.sleep(2)  # 録音スレッドの終了を待つ
+                time.sleep(2)
             main_loop_running = False
-            worker_logger.info("終了コマンドを受信しました。")
-
+            worker_logger.info("終了コマンドを受信しました")
+            
     except Exception as e:
         worker_logger.error(f"コマンド処理エラー: {e}")
-        if os.path.exists(COMMAND_FILE):
-            os.remove(COMMAND_FILE)
 
 def cleanup():
     """終了処理"""
-    update_status({'recording': False, 'status': 'offline'})
-    if os.path.exists(COMMAND_FILE):
-        os.remove(COMMAND_FILE)
-    worker_logger.info("ワーカープロセスをクリーンアップしました。")
+    update_status({
+        'recording': 'false',
+        'status': 'offline'
+    })
+    worker_logger.info("ワーカープロセスをクリーンアップしました")
 
 if __name__ == '__main__':
     if not os.path.exists(RECORDINGS_DIR):
         os.makedirs(RECORDINGS_DIR)
-
+    
     try:
-        # 起動時にステータスを初期化
-        worker_logger.info(f"初期ステータスファイル書き込み試行: {STATUS_FILE}")
-        update_status({'recording': False, 'status': 'idle'})
-        worker_logger.info("初期ステータスファイル書き込み成功。")
-
+        # 起動時の初期化
+        initialize_redis_status()
+        cleanup_temp_files()
+        
+        # 起動時にステータスを設定
+        update_status({
+            'recording': 'false',
+            'status': 'idle',
+            'pid': os.getpid()
+        })
+        
         worker_logger.info("コマンド待機ループを開始します...")
+        
         while main_loop_running:
-            check_command()
-            # Webサーバーに生存を知らせるため、ステータスを定期的に更新する
-            update_status()
-            time.sleep(0.5)
-            
+            process_commands()
+            # 定期的に生存確認
+            if int(time.time()) % 10 == 0:
+                update_status({'pid': os.getpid()})
+                
     except KeyboardInterrupt:
-        worker_logger.info("キーボード割り込みにより終了します。")
+        worker_logger.info("キーボード割り込みにより終了します")
     except Exception as e:
-        # ループ開始前の致命的なエラーをログに記録
         worker_logger.error(f"ワーカーのメイン処理で致命的なエラーが発生: {e}", exc_info=True)
     finally:
         cleanup()
-        worker_logger.info("録音ワーカーがシャットダウンしました。")
+        worker_logger.info("録音ワーカーがシャットダウンしました")
