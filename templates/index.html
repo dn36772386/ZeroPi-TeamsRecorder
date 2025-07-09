@@ -704,15 +704,16 @@
         let socket = null;
         let timerInterval;
         let recordingStartTime;
-        let isRecording = false;
-
-        // === WebSocket接続 ===
+        let isRecording = false;        // === WebSocket接続 ===
         function initWebSocket() {
             socket = io();
-
+            
+            // 接続オプションを追加
             socket.on('connect', () => {
                 console.log('WebSocket接続成功');
                 updateConnectionStatus(true);
+                // 接続時に即座にステータスを要求
+                socket.emit('request_status');
             });
 
             socket.on('disconnect', () => {
@@ -1042,14 +1043,15 @@
                 showMessage('ファイルの削除に失敗しました。', 'error');
                 console.error('Error deleting file:', error);
             }
-        }
-
-        async function refreshDevices() {
+        }        async function refreshDevices() {
             const refreshText = document.getElementById('refresh-text');
             const refreshSpinner = document.getElementById('refresh-spinner');
             
             refreshText.style.display = 'none';
             refreshSpinner.style.display = 'block';
+            
+            // キャッシュクリアを要求
+            await fetch('/clear_bluetooth_cache', { method: 'POST' });
             
             await loadDevices();
             

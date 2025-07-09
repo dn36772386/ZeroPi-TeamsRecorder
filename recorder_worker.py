@@ -11,6 +11,7 @@ import subprocess
 import signal
 import threading
 import redis
+import shutil
 import numpy as np
 from datetime import datetime
 
@@ -105,10 +106,10 @@ def update_status(status_dict):
         
         # 更新時刻を追加
         processed_dict['updated_at'] = str(time.time())
-        
-        # Redisに保存
-        redis_client.hmset("recorder:status", processed_dict)
+          # Redisに保存
+        redis_client.hset("recorder:status", mapping=processed_dict)
         redis_client.publish("recorder:status_update", "update")
+        redis_client.publish("recorder:status_changed", json.dumps(processed_dict))
         
     except Exception as e:
         worker_logger.error(f"ステータス更新エラー: {e}")
@@ -214,7 +215,7 @@ def cleanup_temp_files():
                     if os.path.getsize(file_path) > 0:
                         # recordingsディレクトリに移動
                         final_path = os.path.join(RECORDINGS_DIR, f)
-                        os.rename(file_path, final_path)
+                        shutil.move(file_path, final_path)
                         worker_logger.info(f"未完了の録音ファイルを保存: {f}")
                     else:
                         # 空ファイルは削除
@@ -343,7 +344,7 @@ def record_audio_thread(device_mac, filename_base):
         
         # ファイルを最終保存場所に移動
         if os.path.exists(temp_ogg_path) and os.path.getsize(temp_ogg_path) > 0:
-            os.rename(temp_ogg_path, final_ogg_path)
+            shutil.move(temp_ogg_path, final_ogg_path)
             worker_logger.info(f"録音ファイルを保存: {final_ogg_path}")
         
     except subprocess.TimeoutExpired:
@@ -372,7 +373,7 @@ def process_commands():
     
     try:
         # ブロッキングでコマンドを待機（タイムアウト1秒）
-        result = redis_client.brpop("recorder:commands", timeout=1)
+        result = redis_client.brpop("recorder:commands", timeout=0.1)  # 100msに短縮
         if not result:
             return
         
@@ -450,16 +451,16 @@ if __name__ == '__main__':
         update_status({
             'recording': 'false',
             'status': 'idle',
-            'pid': os.getpid()
-        })
+            'pid': os.getpid()        })
         
         worker_logger.info("コマンド待機ループを開始します...")
         
         while main_loop_running:
             process_commands()
             # 定期的に生存確認
-            if int(time.time()) % 10 == 0:
+            if int(time.time() * 10) % 100 == 0:  # 10秒ごと
                 update_status({'pid': os.getpid()})
+            time.sleep(0.05)  # CPU使用率を抑える
                 
     except KeyboardInterrupt:
         worker_logger.info("キーボード割り込みにより終了します")

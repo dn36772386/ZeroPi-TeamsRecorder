@@ -36,6 +36,7 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 # 録音ディレクトリ（tmpfsを使用してSDカード保護）
 RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
 TEMP_DIR = "/tmp/recorder"
+bluetooth_cache = {'devices': [], 'timestamp': 0}
 
 # Redis接続
 try:
@@ -89,7 +90,7 @@ def load_config():
 def save_config(config):
     """Redisに設定を保存"""
     try:
-        redis_client.hmset("recorder:config", config)
+        redis_client.hset("recorder:config", mapping=config)
         logging.info("設定を保存しました")
     except Exception as e:
         logging.error(f"設定保存エラー: {e}")
@@ -162,6 +163,19 @@ def handle_disconnect():
     """クライアント切断時"""
     connected_clients.discard(request.sid)
     logging.info(f"クライアント切断: {request.sid}")
+
+@socketio.on('request_status')
+def handle_request_status():
+    """クライアントからのステータス要求"""
+    status = get_worker_status()
+    if status:
+        emit('status_update', status)
+
+@app.route('/clear_bluetooth_cache', methods=['POST'])
+def clear_bluetooth_cache():
+    """Bluetoothキャッシュをクリア"""
+    bluetooth_cache['timestamp'] = 0
+    return jsonify({'success': True})
 
 # --- ルートハンドラー ---
 
@@ -452,11 +466,17 @@ def connect_to_wifi(ssid, password):
 
 def get_bluetooth_devices():
     """すべてのBluetoothアダプタからペアリング済みデバイスを取得"""
+    global bluetooth_cache
+    
+    # キャッシュが有効な場合（30秒以内）は返す
+    if time.time() - bluetooth_cache['timestamp'] < 30:
+        return bluetooth_cache['devices']
+    
     devices = []
     
     try:
         hci_result = subprocess.run(['hciconfig'], 
-                                  capture_output=True, text=True, timeout=10)
+                                  capture_output=True, text=True, timeout=3)  # タイムアウト短縮
         
         adapters = []
         current_adapter = None
@@ -465,7 +485,7 @@ def get_bluetooth_devices():
             if line.startswith('hci'):
                 adapter_name = line.split(':')[0]
                 current_adapter = {'name': adapter_name}
-            elif current_adapter and 'BD Address:' in line:
+            elif current_adapter and 'BD Address:' in line:                
                 bd_addr = line.split('BD Address:')[1].split()[0]
                 current_adapter['address'] = bd_addr
                 adapters.append(current_adapter)
@@ -475,7 +495,7 @@ def get_bluetooth_devices():
             cmd = f'select {adapter["address"]}\ndevices\nexit\n'
             result = subprocess.run(['bluetoothctl'], 
                                   input=cmd,
-                                  capture_output=True, text=True, timeout=10)
+                                  capture_output=True, text=True, timeout=3)  # タイムアウト短縮
             
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
@@ -488,7 +508,7 @@ def get_bluetooth_devices():
                             info_cmd = f'select {adapter["address"]}\ninfo {mac}\nexit\n'
                             info_result = subprocess.run(['bluetoothctl'],
                                                        input=info_cmd,
-                                                       capture_output=True, text=True, timeout=10)
+                                                       capture_output=True, text=True, timeout=3)
                             
                             info_lower = info_result.stdout.lower()
                             connected = 'connected: yes' in info_lower
@@ -498,8 +518,7 @@ def get_bluetooth_devices():
                             if paired:
                                 devices.append({
                                     'mac': mac,
-                                    'name': name,
-                                    'adapter': adapter['address'],
+                                    'name': name,                                    'adapter': adapter['address'],
                                     'adapter_name': adapter['name'],
                                     'connected': connected,
                                     'paired': paired,
@@ -508,6 +527,10 @@ def get_bluetooth_devices():
         
     except Exception as e:
         logging.error(f"デバイス一覧取得エラー: {e}")
+        
+    # キャッシュを更新
+    bluetooth_cache['devices'] = devices
+    bluetooth_cache['timestamp'] = time.time()
     
     return devices
 
@@ -517,7 +540,7 @@ def check_device_connection(device_info):
         cmd = f'select {device_info["adapter"]}\ninfo {device_info["mac"]}\nexit\n'
         result = subprocess.run(['bluetoothctl'],
                               input=cmd,
-                              capture_output=True, text=True, timeout=10)
+                              capture_output=True, text=True, timeout=5)
         
         if result.returncode == 0:
             info_output = result.stdout.lower()
@@ -529,13 +552,13 @@ def check_device_connection(device_info):
                 connect_cmd = f'select {device_info["adapter"]}\nconnect {device_info["mac"]}\nexit\n'
                 connect_result = subprocess.run(['bluetoothctl'],
                                               input=connect_cmd,
-                                              capture_output=True, text=True, timeout=15)
+                                              capture_output=True, text=True, timeout=10)
                 
                 if connect_result.returncode == 0:
                     time.sleep(3)
                     verify_result = subprocess.run(['bluetoothctl'],
                                                  input=cmd,
-                                                 capture_output=True, text=True, timeout=10)
+                                                 capture_output=True, text=True, timeout=5)
                     if 'connected: yes' in verify_result.stdout.lower():
                         return True, "デバイスへの接続に成功しました"
                     else:
@@ -550,6 +573,7 @@ def check_device_connection(device_info):
     except subprocess.TimeoutExpired:
         return False, "Bluetooth操作がタイムアウトしました"
     except Exception as e:
+        return False, f"Bluetoothチェック中にエラーが発生しました: {e}"
         return False, f"Bluetoothチェック中にエラーが発生しました: {e}"
 
 def cleanup():
