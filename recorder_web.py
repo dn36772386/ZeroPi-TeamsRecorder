@@ -293,7 +293,17 @@ def start_recording():
         })
     
     duration_minutes = data.get('duration', 120)
-    
+
+    # === pending ステータスを UI に即通知 ===
+    pending_status = {
+        'recording': 'false',
+        'status': 'pending',
+        'start_time': time.time(),
+        'device': json.dumps(device_info)
+    }
+    redis_client.hset("recorder:status", mapping=pending_status)
+    redis_client.publish("recorder:status_update", "update")
+
     command = {
         'action': 'start',
         'duration': duration_minutes,
@@ -320,7 +330,15 @@ def stop_recording():
             'success': False,
             'message': '録音中ではありません'
         })
-    
+
+    # === stopping ステータスを通知 ===
+    stopping_status = {
+        'recording': 'true',
+        'status': 'stopping'
+    }
+    redis_client.hset("recorder:status", mapping=stopping_status)
+    redis_client.publish("recorder:status_update", "update")
+
     if not send_command({'action': 'stop'}):
         return jsonify({
             'success': False,

@@ -400,6 +400,13 @@
             background-color: #F6F8FA;
         }
         
+        .status-badge.pending,
+        .status-badge.stopping {
+            color: #8250DF;
+            border-color: rgba(130, 80, 223, 0.4);
+            background-color: #EDE9FF;
+        }
+
         .status-dot {
             width: 8px;
             height: 8px;
@@ -747,13 +754,40 @@
         }
 
         function updateRecordingStatus(status) {
+            const isPending   = status.status === 'pending';
+            const isStopping  = status.status === 'stopping';
             isRecording = status.recording === 'true' || status.recording === true;
             const recordingTimer = document.getElementById('recording-timer');
 
+            const startBtn = document.getElementById('start-button');
+            const stopBtn = document.getElementById('stop-button');
+
+            if (isPending) {
+                // 録音準備中
+                startBtn.disabled = true;
+                startBtn.textContent = '準備中…';
+                startBtn.style.display = 'inline-flex';
+                stopBtn.style.display = 'none';
+            } else if (isStopping) {
+                // 停止処理中
+                startBtn.style.display = 'none';
+                stopBtn.style.display  = 'inline-flex';
+                stopBtn.disabled       = true;
+                stopBtn.textContent    = '停止中…';
+            } else if (isRecording) {
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-flex';
+                stopBtn.disabled = false;
+                stopBtn.textContent = '録音停止';
+            } else {
+                startBtn.style.display = 'inline-flex';
+                stopBtn.style.display = 'none';
+                startBtn.disabled = !selectedDevice;
+                startBtn.textContent = '録音開始';
+            }
+
             if (isRecording) {
                 recordingTimer.classList.add('active');
-                
-                // タイマーの更新
                 if (!timerInterval && status.start_time) {
                     recordingStartTime = status.start_time * 1000;
                     timerInterval = setInterval(updateTimer, 1000);
@@ -764,12 +798,8 @@
                 clearInterval(timerInterval);
                 timerInterval = null;
                 document.getElementById('timer').textContent = '00:00:00';
-                
-                // 音声レベルをリセット
                 updateAudioLevel({ level: 0, db: -60 });
             }
-            
-            updateButtonStates();
         }
 
         function updateAudioLevel(data) {
@@ -945,6 +975,8 @@
                 return;
             }
             showMessage('録音開始リクエストを送信しました...');
+            // UI を即 pending に
+            updateRecordingStatus({ recording: false, status: 'pending' });
             try {
                 const response = await fetch('/start_recording', {
                     method: 'POST',
@@ -968,6 +1000,8 @@
 
         async function stopRecording() {
             showMessage('録音停止リクエストを送信しました...');
+            // UI を即 stopping に
+            updateRecordingStatus({ recording: true, status: 'stopping' });
             try {
                 const response = await fetch('/stop_recording', { method: 'POST' });
                 const result = await response.json();

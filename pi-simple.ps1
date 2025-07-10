@@ -2,7 +2,7 @@
 param([string]$cmd = "help")
 
 #$PI = "172.20.10.13"
-$PI = "192.168.0.16"
+$PI = "raspberrypi.local"
 $USER = "nakajima"
 
 if ($cmd -eq "install") {

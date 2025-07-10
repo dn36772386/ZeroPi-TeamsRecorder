@@ -373,7 +373,8 @@ def process_commands():
     
     try:
         # ブロッキングでコマンドを待機（タイムアウト1秒）
-        result = redis_client.brpop("recorder:commands", timeout=0.1)  # 100msに短縮
+        # Redis Pub/Sub 化までは出来ていないため、ポーリング間隔を 20 ms に短縮して待機感を低減
+        result = redis_client.brpop("recorder:commands", timeout=0.02)
         if not result:
             return
         
@@ -387,7 +388,12 @@ def process_commands():
             if redis_client.hget("recorder:status", "recording") == 'true':
                 worker_logger.warning("すでに録音中のため、新しい録音は開始しません")
                 return
-            
+            # ① pending ステータスを即時反映
+            update_status({
+                'recording': 'false',
+                'status': 'pending'
+            })
+
             device = command_data.get('device')
             if not device:
                 update_status({'status': 'error', 'error_message': 'デバイスが指定されていません'})
@@ -460,7 +466,7 @@ if __name__ == '__main__':
             # 定期的に生存確認
             if int(time.time() * 10) % 100 == 0:  # 10秒ごと
                 update_status({'pid': os.getpid()})
-            time.sleep(0.05)  # CPU使用率を抑える
+            time.sleep(0.02)  # 20 msサイクルに合わせる
                 
     except KeyboardInterrupt:
         worker_logger.info("キーボード割り込みにより終了します")
