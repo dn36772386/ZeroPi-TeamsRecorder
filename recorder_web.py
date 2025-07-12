@@ -494,7 +494,7 @@ def download_file(filename):
         if not os.path.exists(filepath):
             return jsonify({'error': 'ファイルが見つかりません'}), 404
         
-        return send_file(filepath, as_attachment=True, download_name=filename)
+        return send_file(filepath, as_attachment=True, attachment_filename=filename)
     
     except Exception as e:
         logging.error(f"ダウンロードエラー: {e}")
