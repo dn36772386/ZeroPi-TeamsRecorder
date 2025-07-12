@@ -130,7 +130,23 @@
             height: 100%;
             width: 0%;
             background: linear-gradient(to right, #4CAF50, #8BC34A, #FFEB3B, #FF9800, #F44336);
-            transition: width 0.1s ease-out;
+            transition: width 0.05s ease-out;
+            will-change: width;
+        }
+
+        .meter-peak {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 2px;
+            height: 100%;
+            background-color: #ff0000;
+            transition: right 0.3s ease-out;
+            opacity: 0;
+        }
+
+        .meter-peak.active {
+            opacity: 1;
         }
 
         .meter-label {
@@ -149,6 +165,7 @@
             background-color: var(--color-canvas-inset);
             border-radius: 6px;
             font-size: 12px;
+            color: var(--color-text-primary);  /* 文字色を黒系に */
         }
 
         .connection-dot {
@@ -156,14 +173,22 @@
             height: 8px;
             border-radius: 50%;
             background-color: #ccc;
+            animation: none;
         }
 
         .connection-status.connected .connection-dot {
             background-color: #4CAF50;
+            animation: pulse 2s infinite;
         }
 
         .connection-status.disconnected .connection-dot {
             background-color: #F44336;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
 
         /* 大きな録音ボタン */
@@ -189,6 +214,8 @@
 
         .btn-record.start:hover:not(:disabled) {
             background-color: var(--color-btn-primary-hover-bg);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
         .btn-record.stop {
@@ -200,11 +227,19 @@
         .btn-record.stop:hover:not(:disabled) {
             background-color: var(--color-btn-danger-hover-bg);
             color: var(--color-btn-danger-hover-text);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
         .btn-record:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-record:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .page-content {
@@ -302,7 +337,9 @@
         
         .Box-body {
             padding: 16px;
-        }        .Box-row {
+        }
+
+        .Box-row {
             padding: 12px 16px;
             border-bottom: 1px solid var(--color-border-muted);
             display: flex;
@@ -355,7 +392,8 @@
             gap: 8px;
             flex-shrink: 0;
         }
-          @media (max-width: 640px) {
+
+        @media (max-width: 640px) {
             .Box-row {
                 padding: 12px;
                 gap: 8px;
@@ -426,10 +464,11 @@
             border-radius: 6px;
             background-color: var(--color-btn-bg);
             cursor: pointer;
-            transition: background-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+            transition: all 0.2s cubic-bezier(0.3, 0, 0.5, 1);
         }
         .btn:hover:not(:disabled) {
             background-color: var(--color-btn-hover-bg);
+            transform: translateY(-1px);
         }
         .btn:disabled {
             opacity: 0.6;
@@ -457,7 +496,9 @@
         
         .btn-danger {
             color: var(--color-danger-fg);
-        }        .btn-danger:hover:not(:disabled) {
+        }
+
+        .btn-danger:hover:not(:disabled) {
             color: var(--color-btn-danger-hover-text);
             background-color: var(--color-btn-danger-hover-bg);
             border-color: var(--color-btn-danger-hover-border);
@@ -532,23 +573,45 @@
             font-size: 18px;
         }
 
+        .recording-timer svg {
+            animation: pulse 1s infinite;
+        }
+
         .user-message {
             padding: 8px;
             border-radius: 6px;
-            margin-top: 8px;
             display: none;
+            animation: slideIn 0.3s ease-out;
+            position: fixed;
+            top: 60px;  /* ヘッダーの下に表示 */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 500px;
+            min-width: 300px;
         }
-        .user-message.message-info {
-            background-color: #E1F5FE;
-            color: #0277BD;
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -20px);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
         }
-        .user-message.message-success {
-            background-color: #E8F5E9;
-            color: #2E7D32;
-        }
-        .user-message.message-error {
-            background-color: #FFEBEE;
-            color: #C62828;
+
+        @keyframes slideOut {
+            from {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+            to {
+                opacity: 0;
+                transform: translate(-50%, -20px);
+            }
         }
 
         @media (max-width: 767px) {
@@ -641,6 +704,7 @@
         <div class="audio-meter" id="audio-meter">
             <div class="meter-container">
                 <div class="meter-bar" id="meter-bar"></div>
+                <div class="meter-peak" id="meter-peak"></div>
             </div>
             <div class="meter-label" id="meter-label">-60 dB</div>
         </div>
@@ -679,7 +743,6 @@
                         <!-- ファイルリストがここに動的に挿入されます -->
                     </div>
                 </div>
-                <div id="user-message" class="user-message"></div>
             </div>
 
             <div class="sidebar">
@@ -705,13 +768,21 @@
             </div>
         </div>
     </div>
+    <!-- メッセージ表示エリア（固定位置） -->
+    <div id="user-message" class="user-message"></div>
     
     <script>
         let selectedDevice = null;
         let socket = null;
         let timerInterval;
         let recordingStartTime;
-        let isRecording = false;        // === WebSocket接続 ===
+        let isRecording = false;
+        let audioLevelUpdateTime = 0;
+        let peakLevel = 0;
+        let peakDecayTimer;
+        let animationFrame;
+
+        // === WebSocket接続（改善版） ===
         function initWebSocket() {
             socket = io();
             
@@ -735,6 +806,22 @@
 
             socket.on('audio_level', (data) => {
                 updateAudioLevel(data);
+            });
+
+            // 新しいイベントハンドラー（高速版）
+            socket.on('recording_started', (data) => {
+                showMessage(data.message, 'success');
+            });
+
+            socket.on('recording_stopped', (data) => {
+                showMessage(data.message, 'success');
+                setTimeout(updateFileList, 2000);
+            });
+
+            socket.on('recording_error', (data) => {
+                showMessage(data.message, 'error');
+                // エラー時はUIを元に戻す
+                updateRecordingStatus({ recording: false, status: 'idle' });
             });
         }
 
@@ -765,7 +852,7 @@
             if (isPending) {
                 // 録音準備中
                 startBtn.disabled = true;
-                startBtn.textContent = '準備中…';
+                startBtn.innerHTML = '<div class="spinner"></div> 準備中…';
                 startBtn.style.display = 'inline-flex';
                 stopBtn.style.display = 'none';
             } else if (isStopping) {
@@ -773,17 +860,17 @@
                 startBtn.style.display = 'none';
                 stopBtn.style.display  = 'inline-flex';
                 stopBtn.disabled       = true;
-                stopBtn.textContent    = '停止中…';
+                stopBtn.innerHTML = '<div class="spinner"></div> 停止中…';
             } else if (isRecording) {
                 startBtn.style.display = 'none';
                 stopBtn.style.display = 'inline-flex';
                 stopBtn.disabled = false;
-                stopBtn.textContent = '録音停止';
+                stopBtn.innerHTML = '<svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.25 6.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3.5 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"></path></svg> 録音停止';
             } else {
                 startBtn.style.display = 'inline-flex';
                 stopBtn.style.display = 'none';
                 startBtn.disabled = !selectedDevice;
-                startBtn.textContent = '録音開始';
+                startBtn.innerHTML = '<svg class="octicon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z"></path><path d="M6.379 5.227A.75.75 0 0 1 7.5 5.75v4.5a.75.75 0 0 1-1.121.623l-3.5-2.25a.75.75 0 0 1 0-1.246l3.5-2.25z"></path></svg> 録音開始';
             }
 
             if (isRecording) {
@@ -804,20 +891,47 @@
 
         function updateAudioLevel(data) {
             const meterBar = document.getElementById('meter-bar');
+            const meterPeak = document.getElementById('meter-peak');
             const meterLabel = document.getElementById('meter-label');
             
             if (isRecording && data.level !== undefined) {
-                // レベルをパーセンテージに変換（0-100%）
-                const percentage = Math.min(Math.max(data.level * 100, 0), 100);
-                meterBar.style.width = percentage + '%';
-                
-                // dB表示
-                if (data.db !== undefined) {
-                    meterLabel.textContent = data.db.toFixed(1) + ' dB';
+                // requestAnimationFrameで最適化
+                if (!animationFrame) {
+                    animationFrame = requestAnimationFrame(() => {
+                        // レベルをパーセンテージに変換（0-100%）
+                        const percentage = Math.min(Math.max(data.level * 100, 0), 100);
+                        meterBar.style.width = percentage + '%';
+                        
+                        // ピークレベル更新
+                        if (data.peak !== undefined && data.peak > peakLevel) {
+                            peakLevel = data.peak;
+                            const peakPercentage = Math.min(peakLevel * 100, 100);
+                            meterPeak.style.right = (100 - peakPercentage) + '%';
+                            meterPeak.classList.add('active');
+                            
+                            // ピーク減衰タイマーリセット
+                            clearTimeout(peakDecayTimer);
+                            peakDecayTimer = setTimeout(() => {
+                                peakLevel *= 0.9;
+                                if (peakLevel < 0.01) {
+                                    meterPeak.classList.remove('active');
+                                }
+                            }, 1000);
+                        }
+                        
+                        // dB表示
+                        if (data.db !== undefined) {
+                            meterLabel.textContent = data.db.toFixed(1) + ' dB';
+                        }
+                        
+                        animationFrame = null;
+                    });
                 }
             } else {
                 meterBar.style.width = '0%';
+                meterPeak.classList.remove('active');
                 meterLabel.textContent = '-60 dB';
+                peakLevel = 0;
             }
         }
 
@@ -834,7 +948,15 @@
             messageEl.textContent = text;
             messageEl.className = `user-message message-${type}`;
             messageEl.style.display = 'block';
-            setTimeout(() => { messageEl.style.display = 'none'; }, 5000);
+            // 既存のタイマーをクリア
+            if (messageEl.hideTimer) {
+                clearTimeout(messageEl.hideTimer);
+            }
+            // アニメーション付きで非表示
+            messageEl.hideTimer = setTimeout(() => {
+                messageEl.style.animation = 'slideOut 0.3s ease-out forwards';
+                setTimeout(() => { messageEl.style.display = 'none'; messageEl.style.animation = ''; }, 300);
+            }, 3000);
         }
 
         function updateButtonStates() {
@@ -862,7 +984,7 @@
             document.getElementById('timer').textContent = `${hours}:${minutes}:${seconds}`;
         }
 
-        // === データ取得・操作関数 ===
+        // === データ取得・操作関数（WebSocket版） ===
         async function loadDevices() {
             const deviceList = document.getElementById('device-list');
             deviceList.innerHTML = '';
@@ -969,52 +1091,29 @@
             }
         }
 
-        async function startRecording() {
+        // === 録音操作（WebSocket版） ===
+        function startRecording() {
             if (!selectedDevice) {
                 showMessage('録音を開始する前にデバイスを選択してください。', 'error');
                 return;
             }
-            showMessage('録音開始リクエストを送信しました...');
-            // UI を即 pending に
+            
+            // 即座にUIを更新
             updateRecordingStatus({ recording: false, status: 'pending' });
-            try {
-                const response = await fetch('/start_recording', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        device: selectedDevice,
-                        duration: 120
-                    })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                } else {
-                    showMessage(result.message, 'error');
-                }
-            } catch (error) {
-                showMessage('録音の開始に失敗しました。', 'error');
-                console.error('Error starting recording:', error);
-            }
+            
+            // WebSocketで録音開始
+            socket.emit('start_recording', { 
+                device: selectedDevice,
+                duration: 120
+            });
         }
 
-        async function stopRecording() {
-            showMessage('録音停止リクエストを送信しました...');
-            // UI を即 stopping に
+        function stopRecording() {
+            // 即座にUIを更新
             updateRecordingStatus({ recording: true, status: 'stopping' });
-            try {
-                const response = await fetch('/stop_recording', { method: 'POST' });
-                const result = await response.json();
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                    setTimeout(updateFileList, 2000);
-                } else {
-                    showMessage(result.message, 'error');
-                }
-            } catch (error) {
-                showMessage('録音の停止に失敗しました。', 'error');
-                console.error('Error stopping recording:', error);
-            }
+            
+            // WebSocketで録音停止
+            socket.emit('stop_recording');
         }
 
         async function updateFileList() {
@@ -1027,7 +1126,8 @@
 
                 if (data && Array.isArray(data.files) && data.files.length > 0) {
                     fileList.innerHTML = data.files.map(file => `
-                        <div class="Box-row">                            <div class="Box-row-icon">
+                        <div class="Box-row">
+                            <div class="Box-row-icon">
                                 <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" fill="currentColor">
                                     <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586a.75.75 0 0 1 .53.22l2.914 2.914a.75.75 0 0 1 .22.53V14.25c0 .966-.784 1.75-1.75 1.75H3.75A1.75 1.75 0 0 1 2 14.25V1.75Z"></path>
                                 </svg>
@@ -1077,7 +1177,9 @@
                 showMessage('ファイルの削除に失敗しました。', 'error');
                 console.error('Error deleting file:', error);
             }
-        }        async function refreshDevices() {
+        }
+
+        async function refreshDevices() {
             const refreshText = document.getElementById('refresh-text');
             const refreshSpinner = document.getElementById('refresh-spinner');
             

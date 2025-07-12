@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Raspberry Pi Web録音コントローラー（WebSocket/Redis/mDNS対応版）
+改善版：レスポンス向上とWebSocket最適化
 """
 
 from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
@@ -23,7 +24,7 @@ from datetime import datetime
 # Flaskアプリの設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,9 +39,10 @@ RECORDINGS_DIR = os.path.join(APP_ROOT, "recordings")
 TEMP_DIR = "/tmp/recorder"
 bluetooth_cache = {'devices': [], 'timestamp': 0}
 
-# Redis接続
+# Redis接続（接続プール使用で高速化）
 try:
-    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    pool = redis.ConnectionPool(host='localhost', port=6379, decode_responses=True)
+    redis_client = redis.Redis(connection_pool=pool)
     redis_client.ping()
     logging.info("Redis接続成功")
 except:
@@ -51,6 +53,7 @@ except:
 connected_clients = set()
 worker_status_thread = None
 audio_level_thread = None
+command_pubsub_thread = None
 
 def get_ip_address():
     """サーバーのIPアドレスを取得"""
@@ -90,15 +93,21 @@ def load_config():
 def save_config(config):
     """Redisに設定を保存"""
     try:
-        redis_client.hset("recorder:config", mapping=config)
+        # パイプライン使用で高速化
+        pipe = redis_client.pipeline()
+        pipe.hset("recorder:config", mapping=config)
+        pipe.execute()
         logging.info("設定を保存しました")
     except Exception as e:
         logging.error(f"設定保存エラー: {e}")
 
 def send_command(command):
-    """ワーカープロセスにコマンドを送信"""
+    """ワーカープロセスにコマンドを送信（Pub/Sub方式）"""
     try:
-        redis_client.lpush("recorder:commands", json.dumps(command))
+        # Pub/Subで即座に送信
+        redis_client.publish("recorder:commands", json.dumps(command))
+        # 後方互換性のためリストにも追加
+        redis_client.lpush("recorder:command_queue", json.dumps(command))
         return True
     except Exception as e:
         logging.error(f"コマンド送信エラー: {e}")
@@ -133,19 +142,26 @@ def monitor_worker_status():
                 socketio.emit('status_update', status)
 
 def monitor_audio_levels():
-    """音声レベルの監視とWebSocket配信"""
+    """音声レベルの監視とWebSocket配信（間引き機能付き）"""
     pubsub = redis_client.pubsub()
     pubsub.subscribe('recorder:audio_level')
+    
+    last_emit_time = 0
+    emit_interval = 0.1  # 100ms = 10Hz
     
     for message in pubsub.listen():
         if message['type'] == 'message':
             try:
-                data = json.loads(message['data'])
-                socketio.emit('audio_level', data)
+                current_time = time.time()
+                # 更新頻度を制限
+                if current_time - last_emit_time >= emit_interval:
+                    data = json.loads(message['data'])
+                    socketio.emit('audio_level', data)
+                    last_emit_time = current_time
             except:
                 pass
 
-# --- WebSocketイベントハンドラー ---
+# --- WebSocketイベントハンドラー（改善版） ---
 
 @socketio.on('connect')
 def handle_connect():
@@ -170,6 +186,84 @@ def handle_request_status():
     status = get_worker_status()
     if status:
         emit('status_update', status)
+
+@socketio.on('start_recording')
+def handle_start_recording_ws(data):
+    """WebSocket経由での録音開始（高速版）"""
+    # 即座にpendingステータスを送信
+    emit('status_update', {
+        'recording': False,
+        'status': 'pending',
+        'device': data.get('device')
+    }, broadcast=True)
+    
+    # ワーカーステータス確認
+    status = get_worker_status()
+    if status and status.get('recording'):
+        emit('recording_error', {
+            'message': '既に録音中です'
+        })
+        return
+    
+    device_info = data.get('device')
+    if not device_info:
+        emit('recording_error', {
+            'message': 'デバイスが選択されていません'
+        })
+        return
+    
+    # Bluetooth接続確認（非同期で実行）
+    def check_and_start():
+        connected, message = check_device_connection(device_info)
+        if not connected:
+            socketio.emit('recording_error', {
+                'message': message
+            })
+            return
+        
+        duration_minutes = data.get('duration', 120)
+        command = {
+            'action': 'start',
+            'duration': duration_minutes,
+            'device': device_info
+        }
+        
+        if send_command(command):
+            socketio.emit('recording_started', {
+                'message': f'{duration_minutes}分間の録音を開始しました'
+            })
+        else:
+            socketio.emit('recording_error', {
+                'message': 'コマンドの送信に失敗しました'
+            })
+    
+    # 別スレッドで実行
+    threading.Thread(target=check_and_start, daemon=True).start()
+
+@socketio.on('stop_recording')
+def handle_stop_recording_ws():
+    """WebSocket経由での録音停止（高速版）"""
+    # 即座にstoppingステータスを送信
+    emit('status_update', {
+        'recording': True,
+        'status': 'stopping'
+    }, broadcast=True)
+    
+    status = get_worker_status()
+    if not status or not status.get('recording'):
+        emit('recording_error', {
+            'message': '録音中ではありません'
+        })
+        return
+    
+    if send_command({'action': 'stop'}):
+        emit('recording_stopped', {
+            'message': '録音を停止しました'
+        })
+    else:
+        emit('recording_error', {
+            'message': 'コマンドの送信に失敗しました'
+        })
 
 @app.route('/clear_bluetooth_cache', methods=['POST'])
 def clear_bluetooth_cache():
@@ -266,9 +360,10 @@ def check_connection():
         'message': message
     })
 
+# HTTP版は後方互換性のため残す
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
-    """録音開始API"""
+    """録音開始API（HTTP版）"""
     status = get_worker_status()
     if status and status.get('recording'):
         return jsonify({
@@ -294,15 +389,17 @@ def start_recording():
     
     duration_minutes = data.get('duration', 120)
 
-    # === pending ステータスを UI に即通知 ===
+    # pending ステータスを即通知
     pending_status = {
         'recording': 'false',
         'status': 'pending',
-        'start_time': time.time(),
+        'start_time': str(time.time()),
         'device': json.dumps(device_info)
     }
-    redis_client.hset("recorder:status", mapping=pending_status)
-    redis_client.publish("recorder:status_update", "update")
+    pipe = redis_client.pipeline()
+    pipe.hset("recorder:status", mapping=pending_status)
+    pipe.publish("recorder:status_update", "update")
+    pipe.execute()
 
     command = {
         'action': 'start',
@@ -323,7 +420,7 @@ def start_recording():
 
 @app.route('/stop_recording', methods=['POST'])
 def stop_recording():
-    """録音停止API"""
+    """録音停止API（HTTP版）"""
     status = get_worker_status()
     if not status or not status.get('recording'):
         return jsonify({
@@ -331,13 +428,15 @@ def stop_recording():
             'message': '録音中ではありません'
         })
 
-    # === stopping ステータスを通知 ===
+    # stopping ステータスを通知
     stopping_status = {
         'recording': 'true',
         'status': 'stopping'
     }
-    redis_client.hset("recorder:status", mapping=stopping_status)
-    redis_client.publish("recorder:status_update", "update")
+    pipe = redis_client.pipeline()
+    pipe.hset("recorder:status", mapping=stopping_status)
+    pipe.publish("recorder:status_update", "update")
+    pipe.execute()
 
     if not send_command({'action': 'stop'}):
         return jsonify({
@@ -395,7 +494,7 @@ def download_file(filename):
         if not os.path.exists(filepath):
             return jsonify({'error': 'ファイルが見つかりません'}), 404
         
-        return send_file(filepath, as_attachment=True, attachment_filename=filename)
+        return send_file(filepath, as_attachment=True, download_name=filename)
     
     except Exception as e:
         logging.error(f"ダウンロードエラー: {e}")
@@ -494,7 +593,7 @@ def get_bluetooth_devices():
     
     try:
         hci_result = subprocess.run(['hciconfig'], 
-                                  capture_output=True, text=True, timeout=3)  # タイムアウト短縮
+                                  capture_output=True, text=True, timeout=3)
         
         adapters = []
         current_adapter = None
@@ -513,7 +612,7 @@ def get_bluetooth_devices():
             cmd = f'select {adapter["address"]}\ndevices\nexit\n'
             result = subprocess.run(['bluetoothctl'], 
                                   input=cmd,
-                                  capture_output=True, text=True, timeout=3)  # タイムアウト短縮
+                                  capture_output=True, text=True, timeout=3)
             
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
@@ -536,7 +635,8 @@ def get_bluetooth_devices():
                             if paired:
                                 devices.append({
                                     'mac': mac,
-                                    'name': name,                                    'adapter': adapter['address'],
+                                    'name': name,
+                                    'adapter': adapter['address'],
                                     'adapter_name': adapter['name'],
                                     'connected': connected,
                                     'paired': paired,
@@ -591,7 +691,6 @@ def check_device_connection(device_info):
     except subprocess.TimeoutExpired:
         return False, "Bluetooth操作がタイムアウトしました"
     except Exception as e:
-        return False, f"Bluetoothチェック中にエラーが発生しました: {e}"
         return False, f"Bluetoothチェック中にエラーが発生しました: {e}"
 
 def cleanup():

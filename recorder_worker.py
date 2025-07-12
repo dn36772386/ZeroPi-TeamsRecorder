@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 録音ワーカープロセス（Redis/音声レベル対応版）
+改善版：Pub/Sub方式とパフォーマンス最適化
 """
 
 import logging
@@ -40,9 +41,10 @@ CHUNK = 1024
 CHANNELS = 1
 RATE = 44100
 
-# Redis接続
+# Redis接続（接続プール使用）
 try:
-    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    pool = redis.ConnectionPool(host='localhost', port=6379, decode_responses=True)
+    redis_client = redis.Redis(connection_pool=pool)
     redis_client.ping()
     worker_logger.info("Redis接続成功")
 except Exception as e:
@@ -54,6 +56,7 @@ stop_recording_flag = threading.Event()
 main_loop_running = True
 recording_process = None
 audio_monitor_thread = None
+command_thread = None
 
 def initialize_redis_status():
     """起動時にRedisステータスを初期化"""
@@ -74,42 +77,43 @@ def initialize_redis_status():
             'recording_info': 'null'
         }
         
-        redis_client.hmset("recorder:status", initial_status)
-        worker_logger.info("Redisステータスを初期化しました")
+        # パイプライン使用で高速化
+        pipe = redis_client.pipeline()
+        pipe.hmset("recorder:status", initial_status)
+        pipe.delete("recorder:command_queue")  # 古いコマンドをクリア
+        pipe.execute()
         
-        # コマンドキューもクリア
-        redis_client.delete("recorder:commands")
-        worker_logger.info("コマンドキューをクリアしました")
+        worker_logger.info("Redisステータスを初期化しました")
         
     except Exception as e:
         worker_logger.error(f"Redis初期化エラー: {e}")
 
 def update_status(status_dict):
-    """Redisにステータスを更新"""
+    """Redisにステータスを更新（最適化版）"""
     try:
         # 更新用の辞書を作成
         processed_dict = {}
         
         for key, value in status_dict.items():
             if value is None:
-                # Noneの場合は文字列'null'として保存
                 processed_dict[key] = 'null'
             elif key in ['device', 'recording_info']:
-                # 辞書の場合はJSON文字列に変換
                 if isinstance(value, dict):
                     processed_dict[key] = json.dumps(value)
                 else:
                     processed_dict[key] = str(value)
             else:
-                # その他は文字列に変換
                 processed_dict[key] = str(value)
         
         # 更新時刻を追加
         processed_dict['updated_at'] = str(time.time())
-          # Redisに保存
-        redis_client.hset("recorder:status", mapping=processed_dict)
-        redis_client.publish("recorder:status_update", "update")
-        redis_client.publish("recorder:status_changed", json.dumps(processed_dict))
+        
+        # パイプラインで一括実行
+        pipe = redis_client.pipeline()
+        pipe.hset("recorder:status", mapping=processed_dict)
+        pipe.publish("recorder:status_update", "update")
+        pipe.publish("recorder:status_changed", json.dumps(processed_dict))
+        pipe.execute()
         
     except Exception as e:
         worker_logger.error(f"ステータス更新エラー: {e}")
@@ -136,19 +140,17 @@ def find_pulse_audio_device(device_mac):
                         worker_logger.info(f"PulseAudioデバイスを発見: {source_name}")
                         return source_name
             
-            # もしくは、Bluetoothで始まるソースを探す
+            # Bluetoothソースのフォールバック
             for line in result.stdout.strip().split('\n'):
                 parts = line.split('\t')
                 if len(parts) >= 2:
                     source_name = parts[1]
                     if 'bluez' in source_name.lower():
-                        worker_logger.info(f"Bluetoothソースを発見（MACが一致しない場合のフォールバック）: {source_name}")
-                        # 念のため確認メッセージ
+                        worker_logger.info(f"Bluetoothソースを発見（フォールバック）: {source_name}")
                         worker_logger.warning(f"警告: MACアドレス {device_mac} と完全一致しないが、Bluetoothソース {source_name} を使用します")
                         return source_name
         
         worker_logger.warning(f"MACアドレス {device_mac} に対応するPulseAudioデバイスが見つかりません")
-        worker_logger.warning("Bluetoothデバイスが接続されていることを確認してください")
         return None
         
     except Exception as e:
@@ -156,7 +158,7 @@ def find_pulse_audio_device(device_mac):
         return None
 
 def monitor_audio_levels(source_name):
-    """音声レベルをモニタリングしてRedisに送信"""
+    """音声レベルをモニタリングしてRedisに送信（最適化版）"""
     try:
         # parecordで音声データを取得
         cmd = [
@@ -171,6 +173,14 @@ def monitor_audio_levels(source_name):
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         worker_logger.info("音声レベルモニタリング開始")
         
+        # 更新頻度制御
+        last_update_time = 0
+        update_interval = 0.1  # 100ms = 10Hz
+        
+        # ピークホールド機能
+        peak_level = 0
+        peak_decay = 0.95
+        
         while not stop_recording_flag.is_set():
             # 音声データを読み取り
             data = process.stdout.read(CHUNK * 2)  # 16bit = 2bytes
@@ -183,19 +193,31 @@ def monitor_audio_levels(source_name):
                 rms = np.sqrt(np.mean(audio_array.astype(np.float32)**2))
                 # 正規化（0-1の範囲）
                 normalized_level = min(rms / 32768.0, 1.0)
+                
+                # ピークレベル更新
+                if normalized_level > peak_level:
+                    peak_level = normalized_level
+                else:
+                    peak_level *= peak_decay
+                
                 # dB変換（無音時は-60dB）
                 if normalized_level > 0:
                     db_level = 20 * np.log10(normalized_level)
                 else:
                     db_level = -60
                 
-                # Redisに送信
-                level_data = {
-                    'level': float(normalized_level),
-                    'db': float(db_level),
-                    'timestamp': time.time()
-                }
-                redis_client.publish('recorder:audio_level', json.dumps(level_data))
+                # 更新頻度制限
+                current_time = time.time()
+                if current_time - last_update_time >= update_interval:
+                    # Redisに送信
+                    level_data = {
+                        'level': float(normalized_level),
+                        'peak': float(peak_level),
+                        'db': float(db_level),
+                        'timestamp': current_time
+                    }
+                    redis_client.publish('recorder:audio_level', json.dumps(level_data))
+                    last_update_time = current_time
         
         process.terminate()
         worker_logger.info("音声レベルモニタリング終了")
@@ -307,29 +329,34 @@ def record_audio_thread(device_mac, filename_base):
         
         # 録音監視ループ
         start_time = time.time()
+        last_update_time = 0
+        update_interval = 1.0  # ステータス更新は1秒ごと
         
         while not stop_recording_flag.is_set():
             if recording_process.poll() is not None:
                 worker_logger.warning("録音プロセスが予期せず終了")
                 break
             
-            duration = int(time.time() - start_time)
+            current_time = time.time()
+            if current_time - last_update_time >= update_interval:
+                duration = int(current_time - start_time)
+                
+                # ファイルサイズ確認
+                file_size = 0
+                if os.path.exists(temp_ogg_path):
+                    file_size = os.path.getsize(temp_ogg_path)
+                
+                # ステータス更新
+                update_status({
+                    'recording_info': {
+                        'duration': duration,
+                        'file_size': file_size,
+                        'format': 'OGG Vorbis 128kbps'
+                    }
+                })
+                last_update_time = current_time
             
-            # ファイルサイズ確認
-            file_size = 0
-            if os.path.exists(temp_ogg_path):
-                file_size = os.path.getsize(temp_ogg_path)
-            
-            # ステータス更新
-            update_status({
-                'recording_info': {
-                    'duration': duration,
-                    'file_size': file_size,
-                    'format': 'OGG Vorbis 128kbps'
-                }
-            })
-            
-            time.sleep(0.5)
+            time.sleep(0.1)  # CPU使用率を抑える
         
         # 録音停止
         if recording_process.poll() is None:
@@ -367,33 +394,21 @@ def record_audio_thread(device_mac, filename_base):
         stop_recording_flag.clear()
         worker_logger.info("録音処理が完了しました")
 
-def process_commands():
-    """Redisからコマンドを取得して処理"""
+def process_command(command_data):
+    """コマンドを処理"""
     global main_loop_running
     
     try:
-        # ブロッキングでコマンドを待機（タイムアウト1秒）
-        # Redis Pub/Sub 化までは出来ていないため、ポーリング間隔を 20 ms に短縮して待機感を低減
-        result = redis_client.brpop("recorder:commands", timeout=0.02)
-        if not result:
-            return
-        
-        _, command_json = result
-        command_data = json.loads(command_json)
         action = command_data.get('action')
-        
         worker_logger.info(f"コマンドを受信: {action}")
         
         if action == 'start':
             if redis_client.hget("recorder:status", "recording") == 'true':
                 worker_logger.warning("すでに録音中のため、新しい録音は開始しません")
                 return
-            # ① pending ステータスを即時反映
-            update_status({
-                'recording': 'false',
-                'status': 'pending'
-            })
-
+            
+            # pending ステータスは既にWeb側で設定済み
+            
             device = command_data.get('device')
             if not device:
                 update_status({'status': 'error', 'error_message': 'デバイスが指定されていません'})
@@ -436,6 +451,38 @@ def process_commands():
     except Exception as e:
         worker_logger.error(f"コマンド処理エラー: {e}")
 
+def command_listener():
+    """Pub/Subでコマンドを待機（新方式）"""
+    pubsub = redis_client.pubsub()
+    pubsub.subscribe('recorder:commands')
+    
+    worker_logger.info("Pub/Subコマンドリスナー開始")
+    
+    for message in pubsub.listen():
+        if message['type'] == 'message':
+            try:
+                command_data = json.loads(message['data'])
+                process_command(command_data)
+            except Exception as e:
+                worker_logger.error(f"コマンドパースエラー: {e}")
+
+def legacy_command_processor():
+    """レガシーコマンド処理（後方互換性）"""
+    while main_loop_running:
+        try:
+            # ブロッキングでコマンドを待機
+            result = redis_client.brpop("recorder:command_queue", timeout=1)
+            if result:
+                _, command_json = result
+                command_data = json.loads(command_json)
+                process_command(command_data)
+        except Exception as e:
+            worker_logger.error(f"レガシーコマンド処理エラー: {e}")
+        
+        # 定期的に生存確認
+        if int(time.time()) % 10 == 0:
+            update_status({'pid': os.getpid()})
+
 def cleanup():
     """終了処理"""
     update_status({
@@ -457,21 +504,23 @@ if __name__ == '__main__':
         update_status({
             'recording': 'false',
             'status': 'idle',
-            'pid': os.getpid()        })
+            'pid': os.getpid()
+        })
         
-        worker_logger.info("コマンド待機ループを開始します...")
+        # Pub/Subコマンドリスナー開始
+        command_thread = threading.Thread(target=command_listener, daemon=True)
+        command_thread.start()
         
-        while main_loop_running:
-            process_commands()
-            # 定期的に生存確認
-            if int(time.time() * 10) % 100 == 0:  # 10秒ごと
-                update_status({'pid': os.getpid()})
-            time.sleep(0.02)  # 20 msサイクルに合わせる
+        worker_logger.info("ワーカープロセス起動完了")
+        
+        # レガシーコマンド処理（メインループ）
+        legacy_command_processor()
                 
     except KeyboardInterrupt:
         worker_logger.info("キーボード割り込みにより終了します")
     except Exception as e:
         worker_logger.error(f"ワーカーのメイン処理で致命的なエラーが発生: {e}", exc_info=True)
     finally:
+        main_loop_running = False
         cleanup()
         worker_logger.info("録音ワーカーがシャットダウンしました")
